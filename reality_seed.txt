@@ -1,0 +1,207 @@
+# REALITY SEED — "Vocaly"
+# Solo-founder voice AI startup, 90-day GTM simulation
+# Timeframe: 2026-04-19 through 2026-07-18
+
+================================================================
+1. THE PRODUCT
+================================================================
+
+Name: Vocaly
+One-liner: "Ship a production-grade voice agent in an afternoon."
+Category: Voice AI / developer infrastructure / SMB automation
+
+What it does:
+- Hosted voice agent platform. Devs describe a workflow in plain English
+  (e.g. "answer the phone for a dental clinic, book appointments, transfer
+  emergencies"), and Vocaly compiles it into a low-latency voice agent
+  with its own phone number. Sub-500ms turn latency, barge-in, warm
+  handoffs to humans, call recordings + transcripts, HIPAA-ready tier.
+- Dev-first surface: YAML/Python SDK, webhooks, observability dashboard,
+  A/B testing of prompts and voices.
+- Differentiator: latency, developer ergonomics, and a "voice eval" suite
+  — replay real calls against prompt changes before shipping.
+
+Pricing:
+- $0.12/min usage, $99/mo platform fee for teams.
+- 500 free minutes for new signups. No card to start.
+
+Current stage (2026-04-19):
+- 87 paying workspaces, $4,200 MRR, 9% weekly churn.
+- 1,100 on waitlist carried over from a Show HN post in March 2026.
+- Solo technical founder. 25 hrs/week on GTM. $1,500/mo marketing budget.
+
+================================================================
+2. THE FOUNDER (the user running this simulation)
+================================================================
+
+- Technical solo founder, strong infra background (previously shipped
+  a developer tool with ~15k GitHub stars).
+- Has 4.1k followers on X, mostly devs and infra engineers.
+- Cold on LinkedIn (~600 connections, rarely posts).
+- Wants to replace a marketing/content team with a swarm of LLM agents
+  coordinated from Slack. Vocaly is the first product driven this way.
+- Writes cleanly. Will not tolerate hype copy, emoji soup, or
+  "revolutionize your business" language. Metrics-forward tone only.
+
+================================================================
+3. MARKET & ICP
+================================================================
+
+Primary ICP — "Technical founder or senior dev at a SMB-facing startup":
+- Building something that needs a phone channel (clinics, home services,
+  logistics dispatch, restaurant ordering, hotel concierge, collections,
+  insurance intake).
+- Has tried Twilio + OpenAI Realtime + a weekend of glue code, hit
+  latency/observability/reliability walls.
+- Reads: Latent Space, Interconnects, Every's AI coverage, HN front page,
+  a16z voice-AI pieces, Deepgram/LiveKit blog posts.
+- Hangs out: X (AI-builder corner), HN, LiveKit Slack, Discord servers
+  for Deepgram/Daily/Pipecat, r/LocalLLaMA, niche founder Slacks.
+
+Secondary ICP — "Vertical SaaS founder shipping a voice feature":
+- e.g. dental SaaS, trucking dispatch SaaS, a restaurant OS, a legal
+  intake platform. Non-infra team, needs a hosted answer.
+- Reads: Lenny's, First Round, SaaStr. Hangs out: LinkedIn, small
+  vertical-SaaS founder Slacks, podcasts.
+
+Anti-ICP (do NOT target):
+- Enterprise contact-center buyers (Genesys/Five9 turf, 9-month sales
+  cycles, wrong for self-serve).
+- Consumer voice assistants (no PMF pattern at our price point).
+- Agencies reselling to one-off SMBs (churn in 30 days).
+
+================================================================
+4. COMPETITIVE LANDSCAPE (2026)
+================================================================
+
+- **Vapi, Retell, Bland**: closest peers. Well-funded, aggressive on
+  X. Vapi leads on developer mindshare; Retell leads on vertical case
+  studies; Bland on outbound + enterprise demos. Vocaly wedges on
+  latency + eval suite + dev ergonomics.
+- **OpenAI Realtime API + Twilio DIY**: the real default. Cheap for a
+  weekend; painful in production (no eval, no observability, no
+  barge-in tuning). Vocaly's positioning: "the production layer you
+  would've built yourself, already built."
+- **LiveKit Agents, Pipecat**: open-source frameworks. Not competitors
+  — partner/integration surface. Many Vocaly users graduate from these.
+- **ElevenLabs Conversational AI**: strong voices, weaker dev surface.
+  Compete on ergonomics and latency, not voice fidelity.
+- **Deepgram Voice Agent API**: infra-native, compelling. Compete on
+  end-to-end hosting, not STT/TTS quality.
+
+================================================================
+5. CHANNEL DYNAMICS IN 2026
+================================================================
+
+X / Twitter (AI-builder corner):
+- Demo videos with real latency numbers (not promises) travel. 30–60
+  second screen-records of a voice agent handling a messy call
+  consistently outperform text threads for voice-AI products.
+- Latency shootouts (side-by-side with Vapi/Retell) are catnip but
+  burn goodwill if spun. Publish the methodology.
+- Reply-guy economy is real — helpful answers under Vapi/Retell/Bland
+  threads where someone asks a technical question convert to trials.
+
+HN:
+- Voice-AI Show HN posts in 2026 still hit front page if the demo is
+  embedded and the post is technical. Expect ~2,000–5,000 visits,
+  30–60 signups, long tail SEO juice.
+- Comments are the product review — respond technically, not
+  defensively.
+
+LinkedIn:
+- Lower priority for primary ICP. Higher priority for secondary ICP
+  (vertical SaaS founders). 2 posts/week max, founder-story format,
+  case-study-heavy.
+
+Product Hunt:
+- Still worth one shot. Voice-AI products hit top 3 consistently in
+  2026; expect ~1,500 visitors, ~4% signup conversion.
+
+Reddit:
+- r/LocalLLaMA, r/OpenAI: hostile to self-promo, but technical depth
+  posts ("how we got sub-400ms end-to-end, warts and all") do land.
+- r/SaaS, r/startups: skip.
+
+Developer communities (HIGH priority for primary ICP):
+- LiveKit Slack, Pipecat Discord, Deepgram Discord, AI Engineer
+  community. Lurk → answer questions → soft-mention when relevant.
+  60-day horizon. Slow but highest-quality leads.
+
+SEO / programmatic:
+- "vapi alternative", "retell vs bland", "voice agent latency", "how
+  to reduce LLM voice agent latency", "twilio voice agent tutorial".
+- Volume ~300–1,500/mo per top term, buyer-intent on comparisons.
+- Long-form tutorials with working code out-rank thin marketing pages.
+- 3–6 month payoff horizon.
+
+Cold outbound:
+- Targeting technical founders who just tweeted about building a voice
+  agent, or posted in LiveKit/Pipecat communities with a problem Vocaly
+  solves. 3-sentence DMs, specific to their post. 8–15% response rate
+  at small volume; collapses past ~30/day.
+- Generic cold email to SMB ops is dead — AI-filtered inboxes.
+
+Podcast guesting:
+- Latent Space, Interconnects, AI Engineer podcast, Software Huddle,
+  How About Tomorrow. Each appearance = 40–150 signups, long SEO tail.
+  Booking lead time: 6–10 weeks.
+
+Newsletter sponsorships:
+- Latent Space ($2–4k), AI Tidbits ($600–1,200), Ben's Bites ($1,500+),
+  smaller AI builder newsletters ($200–500). Test small first.
+
+Paid ads:
+- Google Search on competitor terms: viable for "vapi alternative"
+  etc. at $3–6 CPC. Small, targeted.
+- Meta/LinkedIn ads at this budget: skip.
+- Twitter ads: poor targeting, skip.
+
+================================================================
+6. EXPERIMENTS ALREADY RUNNING (do not re-run)
+================================================================
+
+- Weekly X post with a latency demo clip (10 weeks in, flat engagement).
+- One Show HN in March 2026 (drove waitlist).
+- Zero LinkedIn, zero SEO, zero cold outbound, zero community seeding.
+
+================================================================
+7. SEASONAL & MACRO CONTEXT (Q2–Q3 2026)
+================================================================
+
+- Voice-AI category is hot; funding and noise both elevated. Every
+  week a new "I built a voice agent in 30 min" thread trends. Attention
+  is cheap; trust is expensive. Lean on verifiable numbers.
+- "AI slop" fatigue from buyers — sophisticated devs discount any
+  copy containing "revolutionary", "unlock", "10x". Position on
+  measurable latency and real call recordings.
+- Summer slowdown in SMB decision-making mid-June through late August.
+- Enterprise voice-AI RFPs ramping — ignore them, wrong ICP for
+  self-serve motion.
+
+================================================================
+8. CONSTRAINTS (non-negotiable)
+================================================================
+
+- 25 founder-hours/week for GTM. Everything else goes to product.
+- $1,500/month marketing budget (tools, sponsorships, ads combined).
+- No marketing hire. Execution flows through LLM agents coordinated
+  from Slack, driven by the MiroFish simulation report.
+- Preserve founder voice: metrics-forward, dry, technical, zero hype.
+- 90-day window.
+
+================================================================
+9. SUCCESS METRIC
+================================================================
+
+Primary: MRR on 2026-07-18.
+- Baseline (do-nothing): ~$4,800 MRR.
+- Target: $18,000 MRR.
+- Stretch: $30,000 MRR.
+
+Secondary (leading indicators, weekly):
+- Qualified trial starts (workspace makes ≥1 outbound call on a real
+  phone number).
+- Trial-to-paid conversion (currently 22%, target 35%).
+- Weekly churn (currently 9%, target <4%).
+- Organic mentions in AI-builder X and developer communities.

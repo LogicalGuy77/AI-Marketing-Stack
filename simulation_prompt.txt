@@ -1,0 +1,7 @@
+Simulate the next 90 days of GTM for Vocaly (see attached seed). I'm a solo founder replacing a marketing team with Slack-coordinated LLM agents — your report is what those agents will execute, so write it for agents, not humans.
+
+Run head-to-head sims of: founder-led X, LinkedIn, SEO, cold outbound, dev-community seeding (LiveKit/Pipecat/Deepgram), Product Hunt relaunch, newsletter sponsorships, podcast guesting — plus a recommended portfolio under 25 hrs/week and $1,500/month.
+
+Output one Markdown report with these sections: (1) predicted day-90 MRR per strategy with confidence intervals and a ranked list, (2) what simulated ICP agents actually said per strategy with top objections and winning hooks, (3) the recommended portfolio as a 13-week hour + dollar allocation table, (4) per-channel playbooks with cadence, 5 ready-to-post examples in my voice, reply templates, and stop conditions, (5) self-contained briefs for Writer / Outreacher / SEO / Community / Analyst / Orchestrator agents so each can execute without asking me anything, (6) top 5 failure modes with the week-by-week early-warning signal for each, (7) a numbered week-1 checklist with every item tagged [OWNER: AgentName].
+
+Rules: point estimates, no hedging. No paid Meta/LinkedIn ads. No "AI-powered / revolutionize / unlock" copy — metrics-forward, dry, technical. Every example post, DM, and page brief must be usable as-is.

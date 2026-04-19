@@ -1,0 +1,7 @@
+slack-bolt>=1.19
+slack-sdk>=3.27
+requests>=2.31
+python-dotenv>=1.0
+openai>=1.40
+livekit-api>=0.8
+google-genai>=0.3
