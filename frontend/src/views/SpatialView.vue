@@ -41,12 +41,13 @@
       <div class="run-body">
         <div class="scene-wrap">
           <canvas ref="canvasRef"></canvas>
-          <div class="legend">
-            <span class="leg"><span class="dot" style="background:#4b5563"></span>Uninformed</span>
-            <span class="leg"><span class="dot" style="background:#ef4444"></span>{{ beliefLabels[0] || 'Belief A' }}</span>
-            <span v-if="beliefLabels[1]" class="leg"><span class="dot" style="background:#facc15"></span>{{ beliefLabels[1] }}</span>
-            <span class="leg"><span class="dot" style="background:#cbd5e1;border-radius:0;width:8px;height:10px;clip-path:polygon(50% 0,100% 100%,0 100%)"></span>Journalist</span>
-          </div>
+          <SceneLegend :belief-labels="beliefLabels" />
+          <div class="scene-hint">Click any agent · drag to orbit · scroll to zoom</div>
+          <AgentInfoPanel
+            :agent="selectedAgent"
+            :narratives="narrativeMap"
+            @close="closeAgentPanel"
+          />
         </div>
         <aside class="rail-wrap">
           <ThoughtRail :thoughts="thoughts" />
@@ -74,10 +75,22 @@
         <div class="compare-scene">
           <div class="scene-title">{{ runs[0]?.scenario?.title }}</div>
           <canvas ref="canvasA"></canvas>
+          <SceneLegend :belief-labels="runs[0]?.scenario?.narratives || []" compact />
+          <AgentInfoPanel
+            :agent="selectedAgentA"
+            :narratives="runs[0]?.scenario?.narrative_map || {}"
+            @close="selectedAgentA = null"
+          />
         </div>
         <div class="compare-scene">
           <div class="scene-title">{{ runs[1]?.scenario?.title }}</div>
           <canvas ref="canvasB"></canvas>
+          <SceneLegend :belief-labels="runs[1]?.scenario?.narratives || []" compact />
+          <AgentInfoPanel
+            :agent="selectedAgentB"
+            :narratives="runs[1]?.scenario?.narrative_map || {}"
+            @close="selectedAgentB = null"
+          />
         </div>
       </div>
       <div class="compare-reports">
@@ -104,6 +117,8 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { CityScene } from '../components/spatial/CityScene.js'
 import ScenarioPicker from '../components/spatial/ScenarioPicker.vue'
 import ThoughtRail from '../components/spatial/ThoughtRail.vue'
+import AgentInfoPanel from '../components/spatial/AgentInfoPanel.vue'
+import SceneLegend from '../components/spatial/SceneLegend.vue'
 import {
   getSpatialScenarios,
   startSpatialSim,
@@ -136,6 +151,10 @@ let sceneA = null
 let sceneB = null
 const compareTick = ref(0)
 
+const selectedAgent = ref(null)
+const selectedAgentA = ref(null)
+const selectedAgentB = ref(null)
+
 let pollHandle = null
 
 const phaseLabel = computed(() => {
@@ -156,6 +175,7 @@ const informedCount = computed(() => {
 })
 const progressPct = computed(() => Math.round((currentTick.value / totalTicks.value) * 100))
 const beliefLabels = computed(() => currentScenario.value?.narratives ?? [])
+const narrativeMap = computed(() => currentScenario.value?.narrative_map ?? {})
 
 async function loadScenarios() {
   const r = await getSpatialScenarios()
@@ -178,10 +198,20 @@ async function startScenario(scenarioId) {
 
   await nextTick()
   if (scene) scene.dispose()
+  selectedAgent.value = null
   scene = new CityScene()
   scene.init(canvasRef.value, grid.value, zones.value)
+  scene.onAgentSelect = (a) => { selectedAgent.value = a }
 
   pollLoop()
+}
+
+function closeAgentPanel() {
+  selectedAgent.value = null
+  if (scene) {
+    scene.selectedId = null
+    scene._refreshSelectionRing?.()
+  }
 }
 
 async function pollLoop() {
@@ -210,6 +240,10 @@ async function pollLoop() {
       }
       currentTick.value = snap.tick
       scene?.setState(snap, currentScenario.value?.narratives ?? [])
+      if (selectedAgent.value) {
+        const fresh = snap.agents.find((a) => a.id === selectedAgent.value.id)
+        if (fresh) selectedAgent.value = fresh
+      }
     }
 
     if (data.status === 'done' && data.latest_tick >= totalTicks.value) {
@@ -242,10 +276,14 @@ async function transitionToCompare() {
   phase.value = 'compare'
   compareTick.value = totalTicks.value
   await nextTick()
+  selectedAgentA.value = null
+  selectedAgentB.value = null
   sceneA = new CityScene()
   sceneA.init(canvasA.value, grid.value, zones.value)
+  sceneA.onAgentSelect = (a) => { selectedAgentA.value = a }
   sceneB = new CityScene()
   sceneB.init(canvasB.value, grid.value, zones.value)
+  sceneB.onAgentSelect = (a) => { selectedAgentB.value = a }
   renderCompareTick(compareTick.value)
 }
 
@@ -256,6 +294,14 @@ function renderCompareTick(tick) {
   const snapB = b.snapshotsByTick.get(tick) || lastTickSnap(b.snapshotsByTick, tick)
   if (snapA) sceneA?.setState(snapA, a.scenario.narratives)
   if (snapB) sceneB?.setState(snapB, b.scenario.narratives)
+  if (selectedAgentA.value && snapA) {
+    const fresh = snapA.agents.find((x) => x.id === selectedAgentA.value.id)
+    if (fresh) selectedAgentA.value = fresh
+  }
+  if (selectedAgentB.value && snapB) {
+    const fresh = snapB.agents.find((x) => x.id === selectedAgentB.value.id)
+    if (fresh) selectedAgentB.value = fresh
+  }
 }
 
 function lastTickSnap(map, tick) {

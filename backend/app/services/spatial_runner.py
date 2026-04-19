@@ -207,9 +207,13 @@ def _move_agent(agent: Agent, tick: int) -> None:
         _clamp_in_zone(agent)
 
 
-def _propagate(agents: List[Agent], scenario: Dict[str, Any]) -> List[str]:
-    """Return list of agent ids whose knowledge flipped this tick."""
+def _propagate(agents: List[Agent], scenario: Dict[str, Any]) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """Return (flipped_ids, transfer_events) for this tick.
+
+    transfer_events: list of {from, to, belief} describing who taught whom.
+    """
     flipped: List[str] = []
+    transfers: List[Dict[str, Any]] = []
     narratives = list(scenario["narratives"].keys())
     competing = len(narratives) > 1
 
@@ -225,8 +229,13 @@ def _propagate(agents: List[Agent], scenario: Dict[str, Any]) -> List[str]:
                 else:
                     u.belief = i.belief
                 flipped.append(u.id)
+                transfers.append({
+                    "from": i.id,
+                    "to": u.id,
+                    "belief": u.belief,
+                })
                 break
-    return flipped
+    return flipped, transfers
 
 
 def _thought_prompt(agent: Agent, scenario: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -264,12 +273,19 @@ def _generate_thought_safe(client: LLMClient, agent: Agent, scenario: Dict[str, 
         return "…"
 
 
-def _snapshot(tick: int, agents: List[Agent], flipped: List[str], new_thoughts: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _snapshot(
+    tick: int,
+    agents: List[Agent],
+    flipped: List[str],
+    new_thoughts: List[Dict[str, Any]],
+    transfers: List[Dict[str, Any]],
+) -> Dict[str, Any]:
     flipped_set = set(flipped)
     return {
         "tick": tick,
         "agents": [a.as_dict(flipped_this_tick=(a.id in flipped_set)) for a in agents],
         "new_thoughts": new_thoughts,
+        "transfers": transfers,
     }
 
 
@@ -291,14 +307,14 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
             a.last_thought = text
             initial_thoughts.append({"agent_id": a.id, "tick": 0, "text": text})
 
-    snap0 = _snapshot(0, agents, initial_flipped, initial_thoughts)
+    snap0 = _snapshot(0, agents, initial_flipped, initial_thoughts, [])
     with _STATE_LOCK:
         SPATIAL_STATE[simulation_id]["snapshots"].append(snap0)
 
     for tick in range(1, TOTAL_TICKS + 1):
         for a in agents:
             _move_agent(a, tick)
-        flipped = _propagate(agents, scenario)
+        flipped, transfers = _propagate(agents, scenario)
 
         new_thoughts: List[Dict[str, Any]] = []
         if flipped:
@@ -311,7 +327,7 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
                     a.learned_at_tick = tick
                     new_thoughts.append({"agent_id": a.id, "tick": tick, "text": text})
 
-        snap = _snapshot(tick, agents, flipped, new_thoughts)
+        snap = _snapshot(tick, agents, flipped, new_thoughts, transfers)
         with _STATE_LOCK:
             SPATIAL_STATE[simulation_id]["snapshots"].append(snap)
 

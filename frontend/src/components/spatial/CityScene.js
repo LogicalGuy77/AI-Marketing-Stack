@@ -57,6 +57,17 @@ const AGENT_BODY_COLOR = {
   journalist: 0xf3f4f6,
 }
 
+// Role display metadata: glyph, label, badge fill/text color
+const ROLE_META = {
+  official:   { glyph: '★', label: 'GOV',   fill: '#1e3a8a', text: '#ffffff' },
+  student:    { glyph: '✎', label: 'STU',   fill: '#7e22ce', text: '#ffffff' },
+  vendor:     { glyph: '⚖', label: 'VEND',  fill: '#b45309', text: '#ffffff' },
+  worker:     { glyph: '⚒', label: 'WORK',  fill: '#374151', text: '#ffffff' },
+  citizen:    { glyph: '◉', label: 'CIT',   fill: '#047857', text: '#ffffff' },
+  visitor:    { glyph: '✈', label: 'VIS',   fill: '#4d7c0f', text: '#ffffff' },
+  journalist: { glyph: '◎', label: 'PRESS', fill: '#0f172a', text: '#fbbf24' },
+}
+
 const BELIEF_HEAD_COLOR = {
   uninformed: 0x475569,
   a: 0xef4444,
@@ -73,12 +84,22 @@ export class CityScene {
     this.resizeObserver = null
     this.raf = null
     this.agentGroup = null
+    this.flowGroup = null
     this.grid = { w: 60, h: 40 }
     this.agents = new Map()
     this.beliefs = []
     this.ripples = []
+    this.flows = [] // active transfer arrows
     this.ready = false
     this.clock = new THREE.Clock()
+    this.raycaster = new THREE.Raycaster()
+    this.pointer = new THREE.Vector2()
+    this.hoveredId = null
+    this.selectedId = null
+    this.onAgentSelect = null
+    this.onAgentHover = null
+    this._handlers = {}
+    this._latestSnapshot = null
   }
 
   init(canvas, grid, zones) {
@@ -119,12 +140,95 @@ export class CityScene {
 
     this.agentGroup = new THREE.Group()
     this.scene.add(this.agentGroup)
+    this.flowGroup = new THREE.Group()
+    this.scene.add(this.flowGroup)
 
     this.resizeObserver = new ResizeObserver(() => this._resize())
     this.resizeObserver.observe(canvas)
 
+    this._bindPointerEvents()
+
     this.ready = true
     this._animate()
+  }
+
+  _bindPointerEvents() {
+    const onMove = (ev) => {
+      const rect = this.canvas.getBoundingClientRect()
+      this.pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
+      this.pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
+      this._updateHover()
+    }
+    const onLeave = () => {
+      this._setHover(null)
+    }
+    const onClick = (ev) => {
+      const rect = this.canvas.getBoundingClientRect()
+      this.pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1
+      this.pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1
+      const id = this._pick()
+      if (id) {
+        this.selectedId = id
+        this._refreshSelectionRing()
+        if (this.onAgentSelect) {
+          const ag = this._agentDataFromSnapshot(id)
+          this.onAgentSelect(ag)
+        }
+      } else {
+        this.selectedId = null
+        this._refreshSelectionRing()
+        if (this.onAgentSelect) this.onAgentSelect(null)
+      }
+    }
+    this._handlers = { onMove, onLeave, onClick }
+    this.canvas.addEventListener('pointermove', onMove)
+    this.canvas.addEventListener('pointerleave', onLeave)
+    this.canvas.addEventListener('click', onClick)
+  }
+
+  _pick() {
+    if (!this.camera || !this.agentGroup) return null
+    this.raycaster.setFromCamera(this.pointer, this.camera)
+    const meshes = []
+    for (const entry of this.agents.values()) {
+      meshes.push(entry.body, entry.head)
+      if (entry.hitProxy) meshes.push(entry.hitProxy)
+    }
+    const hits = this.raycaster.intersectObjects(meshes, false)
+    if (hits.length === 0) return null
+    let obj = hits[0].object
+    while (obj && !obj.userData?.agentId) obj = obj.parent
+    return obj?.userData?.agentId || null
+  }
+
+  _updateHover() {
+    const id = this._pick()
+    this._setHover(id)
+  }
+
+  _setHover(id) {
+    if (id === this.hoveredId) return
+    this.hoveredId = id
+    if (this.canvas) this.canvas.style.cursor = id ? 'pointer' : 'default'
+    for (const [aid, entry] of this.agents) {
+      const isHover = aid === id
+      if (entry.label) entry.label.visible = isHover || aid === this.selectedId
+    }
+    if (this.onAgentHover) {
+      this.onAgentHover(id ? this._agentDataFromSnapshot(id) : null)
+    }
+  }
+
+  _refreshSelectionRing() {
+    for (const [aid, entry] of this.agents) {
+      if (entry.selectRing) entry.selectRing.visible = aid === this.selectedId
+      if (entry.label) entry.label.visible = aid === this.selectedId || aid === this.hoveredId
+    }
+  }
+
+  _agentDataFromSnapshot(id) {
+    if (!this._latestSnapshot) return null
+    return this._latestSnapshot.agents.find((a) => a.id === id) || null
   }
 
   _setupLights() {
@@ -318,6 +422,7 @@ export class CityScene {
 
   setState(snapshot, narrativeOrder = []) {
     if (!this.ready || !snapshot) return
+    this._latestSnapshot = snapshot
     this.beliefs = narrativeOrder
     const seen = new Set()
     for (const a of snapshot.agents) {
@@ -327,6 +432,9 @@ export class CityScene {
         entry = this._createAgent(a)
         this.agents.set(a.id, entry)
       }
+      entry.archetype = a.archetype
+      entry.name = a.name
+      entry.zone = a.zone
       // Move toward new target
       entry.targetX = a.x
       entry.targetZ = a.y
@@ -341,6 +449,19 @@ export class CityScene {
         this.agents.delete(id)
       }
     }
+    // Spawn arc arrows for this tick's information transfers
+    if (Array.isArray(snapshot.transfers)) {
+      for (const t of snapshot.transfers) {
+        const from = this.agents.get(t.from)
+        const to = this.agents.get(t.to)
+        if (!from || !to) continue
+        const colorHex = (this.beliefs.length >= 2 && t.belief === this.beliefs[1])
+          ? BELIEF_HEAD_COLOR.b
+          : BELIEF_HEAD_COLOR.a
+        this._spawnFlow(from.targetX, from.targetZ, to.targetX, to.targetZ, colorHex)
+      }
+    }
+    this._refreshSelectionRing()
   }
 
   _createAgent(a) {
@@ -354,6 +475,7 @@ export class CityScene {
     const body = new THREE.Mesh(bodyGeo, bodyMat)
     body.position.y = 0.55
     body.castShadow = true
+    body.userData.agentId = a.id
     group.add(body)
 
     // Head
@@ -368,6 +490,7 @@ export class CityScene {
     const head = new THREE.Mesh(headGeo, headMat)
     head.position.y = 1.15
     head.castShadow = true
+    head.userData.agentId = a.id
     group.add(head)
 
     // Journalists get a little camera prop on a shoulder
@@ -387,7 +510,41 @@ export class CityScene {
       group.add(lens)
     }
 
+    // Role badge (always-visible camera-facing sprite floating above head)
+    const badge = this._makeRoleBadge(a.archetype)
+    badge.position.set(0, 2.05, 0)
+    group.add(badge)
+
+    // Hover/select name label (hidden by default)
+    const label = this._makeNameLabel(a.name, a.archetype)
+    label.position.set(0, 2.75, 0)
+    label.visible = false
+    group.add(label)
+
+    // Selection ring on the ground (hidden by default)
+    const ringGeo = new THREE.RingGeometry(0.55, 0.7, 32)
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x2563eb,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+    })
+    const selectRing = new THREE.Mesh(ringGeo, ringMat)
+    selectRing.rotation.x = -Math.PI / 2
+    selectRing.position.y = 0.06
+    selectRing.visible = false
+    group.add(selectRing)
+
+    // Invisible bigger hit-proxy so tiny figures are easy to click
+    const proxyGeo = new THREE.CylinderGeometry(0.55, 0.55, 2.2, 10)
+    const proxyMat = new THREE.MeshBasicMaterial({ visible: false })
+    const hitProxy = new THREE.Mesh(proxyGeo, proxyMat)
+    hitProxy.position.y = 1.1
+    hitProxy.userData.agentId = a.id
+    group.add(hitProxy)
+
     group.position.set(a.x, 0, a.y)
+    group.userData.agentId = a.id
     this.agentGroup.add(group)
 
     return {
@@ -396,6 +553,13 @@ export class CityScene {
       headMat,
       body,
       head,
+      badge,
+      label,
+      selectRing,
+      hitProxy,
+      id: a.id,
+      name: a.name,
+      zone: a.zone,
       archetype: a.archetype,
       targetX: a.x,
       targetZ: a.y,
@@ -408,8 +572,101 @@ export class CityScene {
         bodyMat.dispose()
         headGeo.dispose()
         headMat.dispose()
+        ringGeo.dispose()
+        ringMat.dispose()
+        proxyGeo.dispose()
+        proxyMat.dispose()
+        if (badge.material?.map) badge.material.map.dispose()
+        badge.material?.dispose?.()
+        if (label.material?.map) label.material.map.dispose()
+        label.material?.dispose?.()
       },
     }
+  }
+
+  _makeRoleBadge(archetype) {
+    const meta = ROLE_META[archetype] || { glyph: '?', label: '???', fill: '#475569', text: '#ffffff' }
+    const canvas = document.createElement('canvas')
+    canvas.width = 256
+    canvas.height = 128
+    const ctx = canvas.getContext('2d')
+    // Pill-shaped badge
+    const w = 256, h = 128, r = 60
+    ctx.fillStyle = meta.fill
+    this._roundRect(ctx, 4, 4, w - 8, h - 8, r)
+    ctx.fill()
+    ctx.lineWidth = 6
+    ctx.strokeStyle = '#ffffff'
+    this._roundRect(ctx, 4, 4, w - 8, h - 8, r)
+    ctx.stroke()
+    // Glyph
+    ctx.fillStyle = meta.text
+    ctx.font = 'bold 60px Inter, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(meta.glyph, 70, 64)
+    // Label
+    ctx.font = 'bold 48px JetBrains Mono, monospace'
+    ctx.textAlign = 'left'
+    ctx.fillText(meta.label, 110, 68)
+
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.anisotropy = 8
+    tex.needsUpdate = true
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })
+    const sprite = new THREE.Sprite(mat)
+    sprite.scale.set(1.5, 0.75, 1)
+    sprite.renderOrder = 999
+    return sprite
+  }
+
+  _makeNameLabel(name, archetype) {
+    const meta = ROLE_META[archetype] || { fill: '#0f172a', text: '#ffffff' }
+    const canvas = document.createElement('canvas')
+    canvas.width = 512
+    canvas.height = 128
+    const ctx = canvas.getContext('2d')
+    const w = 512, h = 128, r = 26
+    // Drop shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'
+    this._roundRect(ctx, 12, 16, w - 16, h - 16, r)
+    ctx.fill()
+    // Card
+    ctx.fillStyle = '#ffffff'
+    this._roundRect(ctx, 8, 8, w - 16, h - 16, r)
+    ctx.fill()
+    // Accent stripe
+    ctx.fillStyle = meta.fill
+    this._roundRect(ctx, 8, 8, 16, h - 16, r)
+    ctx.fill()
+    // Name
+    ctx.fillStyle = '#0f172a'
+    ctx.font = 'bold 52px Inter, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(name, 44, 64)
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.anisotropy = 8
+    tex.needsUpdate = true
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })
+    const sprite = new THREE.Sprite(mat)
+    sprite.scale.set(3.0, 0.75, 1)
+    sprite.renderOrder = 1000
+    return sprite
+  }
+
+  _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath()
+    ctx.moveTo(x + r, y)
+    ctx.lineTo(x + w - r, y)
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+    ctx.lineTo(x + w, y + h - r)
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+    ctx.lineTo(x + r, y + h)
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+    ctx.lineTo(x, y + r)
+    ctx.quadraticCurveTo(x, y, x + r, y)
+    ctx.closePath()
   }
 
   _applyAgentColor(entry, a) {
@@ -426,6 +683,31 @@ export class CityScene {
       entry.headMat.emissiveIntensity = 2.0
       entry.flipDecay = 1.0
     }
+  }
+
+  _spawnFlow(x0, z0, x1, z1, colorHex) {
+    // Arc curve from source to target, animated as a moving particle along the path.
+    const start = new THREE.Vector3(x0, 1.4, z0)
+    const end = new THREE.Vector3(x1, 1.4, z1)
+    const mid = start.clone().lerp(end, 0.5)
+    const dist = start.distanceTo(end)
+    mid.y += Math.min(6, 1.5 + dist * 0.25)
+    const curve = new THREE.QuadraticBezierCurve3(start, mid, end)
+    const pts = curve.getPoints(40)
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(pts)
+    const lineMat = new THREE.LineBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.55,
+    })
+    const line = new THREE.Line(lineGeo, lineMat)
+    this.flowGroup.add(line)
+    // Moving particle (small sphere)
+    const dotGeo = new THREE.SphereGeometry(0.22, 12, 10)
+    const dotMat = new THREE.MeshBasicMaterial({ color: colorHex })
+    const dot = new THREE.Mesh(dotGeo, dotMat)
+    this.flowGroup.add(dot)
+    this.flows.push({ curve, line, lineMat, lineGeo, dot, dotGeo, dotMat, t: 0, life: 1.6 })
   }
 
   _spawnRipple(x, z, colorHex) {
@@ -471,6 +753,28 @@ export class CityScene {
       }
     }
 
+    // Flow arcs (data transfer arrows)
+    for (let i = this.flows.length - 1; i >= 0; i--) {
+      const f = this.flows[i]
+      f.life -= dt
+      f.t += dt * 0.7
+      if (f.life <= 0 || f.t >= 1) {
+        this.flowGroup.remove(f.line)
+        this.flowGroup.remove(f.dot)
+        f.lineGeo.dispose()
+        f.lineMat.dispose()
+        f.dotGeo.dispose()
+        f.dotMat.dispose()
+        this.flows.splice(i, 1)
+        continue
+      }
+      const p = f.curve.getPoint(Math.min(1, f.t))
+      f.dot.position.copy(p)
+      const fade = Math.max(0, f.life / 1.6)
+      f.lineMat.opacity = 0.2 + 0.55 * fade
+      f.dotMat.opacity = 0.4 + 0.6 * fade
+    }
+
     // Ripples
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       const r = this.ripples[i]
@@ -512,6 +816,11 @@ export class CityScene {
     this.ready = false
     if (this.raf) cancelAnimationFrame(this.raf)
     if (this.resizeObserver) this.resizeObserver.disconnect()
+    if (this.canvas && this._handlers) {
+      this.canvas.removeEventListener('pointermove', this._handlers.onMove)
+      this.canvas.removeEventListener('pointerleave', this._handlers.onLeave)
+      this.canvas.removeEventListener('click', this._handlers.onClick)
+    }
     if (this.controls) this.controls.dispose()
     if (this.renderer) {
       this.renderer.dispose()
@@ -531,6 +840,15 @@ export class CityScene {
     this.canvas = null
     this.agents.clear()
     this.ripples = []
+    this.flows = []
+  }
+
+  focusAgent(id) {
+    const entry = this.agents.get(id)
+    if (!entry || !this.controls) return
+    this.controls.target.set(entry.targetX, 1.0, entry.targetZ)
+    this.selectedId = id
+    this._refreshSelectionRing()
   }
 }
 
