@@ -41,6 +41,11 @@ const routes = [
     name: 'Interaction',
     component: InteractionView,
     props: true
+  },
+  {
+    path: '/spatial',
+    name: 'Spatial',
+    component: () => import('../views/SpatialView.vue')
   }
 ]
 

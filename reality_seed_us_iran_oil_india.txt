@@ -1,0 +1,130 @@
+REALITY SEED: US-IRAN WAR (2026) — GLOBAL OIL SHOCK AND IMPACT ON INDIA
+Date of seed: 2026-04-19
+Purpose: Input document for MiroFish swarm-simulation to predict cascading effects on India's energy security, economy, diplomacy, and domestic politics.
+
+================================================================
+PART I — CORE EVENT TIMELINE (FACTUAL + LIVE CONTEXT)
+================================================================
+
+1. Background (Q4 2025 – Q1 2026)
+- IAEA flags Iranian uranium enrichment above 90% weapons-grade threshold at Natanz and Fordow sites.
+- Iran-backed Houthi attacks on Red Sea shipping escalate; three tankers hit near Bab el-Mandeb in February 2026.
+- Israel conducts limited air strikes on IRGC logistics nodes in Syria and western Iran in March 2026.
+- US deploys two carrier strike groups (USS Gerald R. Ford, USS Nimitz) to the Arabian Sea. B-2 bombers forward-deployed to Diego Garcia.
+
+2. Trigger Event (April 2026)
+- April 8, 2026: Iran launches ballistic missiles at US Al-Udeid Air Base in Qatar after a covert US-Israeli cyber-kinetic operation disables enrichment centrifuges at Fordow.
+- April 10, 2026: US declares open military operations against IRGC command targets, Iranian naval assets at Bandar Abbas, and air defense grids.
+- April 14, 2026: Iran mines sections of the Strait of Hormuz and attacks Saudi/UAE oil infrastructure (Abqaiq repeat pattern, Fujairah terminal). Approximately 18% of Abqaiq processing capacity offline.
+- April 17, 2026: Iran formally announces closure of Strait of Hormuz to "hostile vessels." Insurance markets (Lloyd's) suspend hull cover for tankers transiting Hormuz.
+
+3. Current State (as of seed date: April 19, 2026)
+- Brent crude: spiked from $78/bbl (April 1) to $142/bbl intraday April 18, settling near $128/bbl.
+- WTI: $124/bbl.
+- Dubai/Oman benchmark (which India tracks most closely): $134/bbl.
+- ~20% of global seaborne oil transits Hormuz daily (~17 million barrels/day); current flow reduced by ~60%.
+- LNG: Qatar (20% of global LNG exports) announces force majeure on select cargoes; JKM spot prices up 180%.
+- Insurance war-risk premium on Gulf tankers: from 0.05% to 2.5% of hull value.
+
+================================================================
+PART II — INDIA-SPECIFIC EXPOSURE (SEED FACTS)
+================================================================
+
+A. Energy Dependency
+- India imports ~87% of its crude oil.
+- ~45% of India's crude imports transit the Strait of Hormuz (Saudi Arabia, Iraq, UAE, Kuwait).
+- Russia accounts for ~35% of India's crude (post-2022 shift), primarily ESPO and Urals grades — not Hormuz-dependent but subject to G7 price cap and secondary sanctions.
+- Strategic Petroleum Reserve (SPR): 39.2 million barrels — covers roughly 9.5 days of net imports.
+- Diesel and petrol retail prices frozen by OMCs (IOCL, BPCL, HPCL) since 2024 — under-recovery now estimated at ₹18/litre on diesel.
+
+B. Macroeconomic Linkages
+- Every $10/bbl sustained rise in crude adds ~$15 billion to India's import bill annually and ~30 bps to CPI.
+- Current account deficit projection revised from 1.2% to 3.4% of GDP if $130/bbl holds for two quarters.
+- INR under pressure: depreciated from 83.4 to 87.9 per USD in 10 days. RBI intervention drawing down forex reserves (now $612B from $648B).
+- Equity markets: Nifty 50 down 8.3% in 8 sessions; aviation, paint, tyre, and logistics stocks hardest hit.
+
+C. Diplomatic Position
+- India maintains strategic relationships with both the US (QUAD, iCET, defense pacts) and Iran (Chabahar Port, INSTC corridor, historical ties).
+- India abstained from the UNSC resolution condemning Iran's Hormuz closure (April 17, 2026).
+- External Affairs Minister held calls with US Secretary of State, Iranian Foreign Minister, and Saudi/UAE counterparts within 72 hours of the Hormuz closure.
+- Approximately 9 million Indian diaspora in the Gulf (Saudi, UAE, Qatar, Kuwait, Oman, Bahrain) — source of ~$55 billion in annual remittances.
+
+D. Domestic Political Context
+- General election cycle completed May 2024; government has political room but mid-term state elections (Bihar, WB) upcoming.
+- Opposition framing: "failure to lock in Russian oil discounts," "surrender of Chabahar leverage."
+- Fuel subsidy debate reopening; LPG subsidy extension demands from rural constituencies.
+
+================================================================
+PART III — KEY ACTORS (FOR AGENT PERSONA GENERATION)
+================================================================
+
+Indian Government / Policy
+- Prime Minister's Office (PMO)
+- Ministry of External Affairs (MEA)
+- Ministry of Petroleum & Natural Gas
+- Ministry of Finance / RBI Governor
+- National Security Advisor
+- Indian Navy (INS Kolkata, INS Kochi deployed for evacuation ops)
+
+International Actors
+- US (State Dept, DoD, CENTCOM)
+- Iran (Supreme Leader's office, IRGC, Foreign Ministry)
+- Saudi Arabia, UAE (oil supply negotiations)
+- Russia (Rosneft, discounted Urals supply)
+- China (competitor buyer of discounted Russian/Iranian oil)
+- Qatar (LNG)
+
+Indian Industry
+- IOCL, BPCL, HPCL (refiners/OMCs)
+- Reliance Industries (Jamnagar refinery, largest exporter of products)
+- ONGC, OIL India (upstream)
+- GAIL, Petronet LNG
+- Aviation: IndiGo, Air India, Tata Group
+- Automotive: Maruti, Tata Motors, M&M (demand destruction risk)
+- IT exporters (hedged by weak INR, but client-country recession risk)
+
+Civil Society / Public
+- Urban middle class (fuel price sensitivity)
+- Rural households (LPG, kerosene, diesel for irrigation)
+- Truckers' unions, fishing communities (diesel-dependent)
+- Indian workers in the Gulf (evacuation fears)
+- Media (primetime framing: strategic autonomy vs. Western alignment)
+
+================================================================
+PART IV — OPEN QUESTIONS FOR SIMULATION
+================================================================
+
+1. Does India trigger SPR release in coordination with IEA, or go alone?
+2. Does India quietly increase Russian crude share above the informal 40% ceiling, risking secondary sanctions?
+3. How does the government manage fuel price pass-through — subsidy, tax cut on excise, or partial pass-through?
+4. Does the Chabahar Port operation (India's hedge against Pakistan/China's Gwadar) become untenable if the US pressures India to cut all Iran links?
+5. Does a Gulf evacuation (Operation Ajay-scale or larger) become necessary? Political optics?
+6. What is the RBI's reaction function — rate hike to defend INR vs. growth concerns?
+7. Do Indian refiners profit from the crack spread (as in 2022-23 with Russian crude arbitrage) or does this episode compress margins?
+8. Longer-term: does this accelerate India's energy transition narrative (EVs, green hydrogen, nuclear expansion) or reinforce fossil lock-in via panic stockpiling?
+9. Regional posture: does India offer naval escort for its tankers (as it did briefly in the Red Sea in 2024), and how is this received by the US and Iran?
+10. Does Pakistan's parallel energy crisis (also Hormuz-dependent, weaker FX reserves) create spillover — refugee flows, border tension, or diplomatic opening?
+
+================================================================
+PART V — INITIAL SCENARIO BRANCHES (SEED FOR AGENT DEBATE)
+================================================================
+
+Branch A — "Short War, Contained" (Hormuz reopens within 3 weeks)
+- Crude settles $95-105/bbl by end Q2 2026
+- India absorbs shock via modest SPR release + excise cut
+- Diplomatic win: India credited for back-channel
+
+Branch B — "Prolonged Stalemate" (Hormuz partially open, attacks continue 3-6 months)
+- Crude oscillates $110-140/bbl
+- Major fiscal stress; CAD blows out; INR at 92+
+- Government forced into fuel price hike; street protests in metros
+
+Branch C — "Regional Conflagration" (Israel-Hezbollah-Iran full war, Saudi infrastructure repeatedly hit)
+- Crude $160-200/bbl sustained
+- Gulf evacuation of Indian nationals; remittance collapse
+- Emergency budget; possible IMF consultation (not bailout)
+- Strategic realignment: India-Russia-China energy bloc strengthens
+
+================================================================
+END OF SEED
+================================================================

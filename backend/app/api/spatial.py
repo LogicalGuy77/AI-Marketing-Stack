@@ -1,0 +1,51 @@
+"""
+Spatial simulation API — standalone endpoints for the 3D city sim.
+
+Independent of graph-build / OASIS / report. Frontend polls /state for new
+per-tick snapshots and fetches /report once status == 'done'.
+"""
+
+from flask import jsonify, request
+
+from ..services import spatial_runner
+from . import spatial_bp
+
+
+@spatial_bp.route("/scenarios", methods=["GET"])
+def scenarios():
+    return jsonify({
+        "scenarios": spatial_runner.list_scenarios(),
+        "zones": spatial_runner.get_zones(),
+        "total_ticks": spatial_runner.TOTAL_TICKS,
+        "grid": {"w": spatial_runner.GRID_W, "h": spatial_runner.GRID_H},
+    })
+
+
+@spatial_bp.route("/start", methods=["POST"])
+def start():
+    body = request.get_json(silent=True) or {}
+    scenario_id = body.get("scenario")
+    if not scenario_id:
+        return jsonify({"error": "scenario required"}), 400
+    try:
+        simulation_id = spatial_runner.start_simulation(scenario_id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"simulation_id": simulation_id, "scenario": scenario_id})
+
+
+@spatial_bp.route("/<sim_id>/state", methods=["GET"])
+def state(sim_id: str):
+    since = int(request.args.get("since", -1))
+    data = spatial_runner.get_state_since(sim_id, since)
+    if "error" in data:
+        return jsonify(data), 404
+    return jsonify(data)
+
+
+@spatial_bp.route("/<sim_id>/report", methods=["GET"])
+def report(sim_id: str):
+    rep = spatial_runner.get_report(sim_id)
+    if rep is None:
+        return jsonify({"error": "not_ready"}), 404
+    return jsonify(rep)

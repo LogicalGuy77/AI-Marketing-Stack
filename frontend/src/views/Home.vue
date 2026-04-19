@@ -191,7 +191,7 @@
 
             <!-- 启动按钮 -->
             <div class="console-section btn-section">
-              <button 
+              <button
                 class="start-engine-btn"
                 @click="startSimulation"
                 :disabled="!canSubmit || loading"
@@ -200,6 +200,11 @@
                 <span v-else>{{ $t('home.initializing') }}</span>
                 <span class="btn-arrow">→</span>
               </button>
+              <router-link to="/spatial" class="spatial-entry-btn">
+                <span class="spatial-icon">◇</span>
+                <span class="spatial-label">Spatial Intelligence Sim</span>
+                <span class="spatial-sub">3D · Information Geography · 2 Scenarios</span>
+              </router-link>
             </div>
           </div>
         </div>
@@ -949,5 +954,50 @@ html[lang="en"] .workflow-list .step-desc {
 
 html[lang="en"] .workflow-list {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Spatial entry button on Home */
+.btn-section { display: flex; flex-direction: column; gap: 10px; }
+.spatial-entry-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 18px;
+  border: 1px solid #2a3654;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #0f1624 0%, #141c2f 100%);
+  color: #e6ecf5;
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  overflow: hidden;
+}
+.spatial-entry-btn:hover {
+  border-color: #6ee7b7;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 30px -14px rgba(110, 231, 183, 0.5);
+}
+.spatial-entry-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 60% at 100% 0%, rgba(110, 231, 183, 0.08), transparent 60%);
+  pointer-events: none;
+}
+.spatial-icon {
+  color: #6ee7b7;
+  font-size: 16px;
+  letter-spacing: 4px;
+}
+.spatial-label {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.3px;
+}
+.spatial-sub {
+  font-size: 11px;
+  color: #9fb0c9;
+  letter-spacing: 1.5px;
+  font-family: 'JetBrains Mono', monospace;
 }
 </style>
