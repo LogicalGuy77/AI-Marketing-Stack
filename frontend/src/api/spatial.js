@@ -13,3 +13,12 @@ export const getSpatialReport = (simId) =>
     if (err?.response?.status === 404) return null
     throw err
   })
+
+export const interviewAgent = (simId, agentId, question) =>
+  service.post(`/api/spatial/${simId}/interview`, { agent_id: agentId, question })
+
+export const listSpatialRuns = () =>
+  service.get('/api/spatial/runs')
+
+export const loadSpatialRun = (simId) =>
+  service.get(`/api/spatial/runs/${simId}`)

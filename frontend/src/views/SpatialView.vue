@@ -5,7 +5,9 @@
       v-if="phase === 'pick'"
       :scenarios="scenarios"
       :completed-ids="[]"
+      :previous-runs="previousRuns"
       @pick="startScenario"
+      @replay="replayRun"
     />
 
     <!-- PHASE 2: cinematic player -->
@@ -48,16 +50,68 @@
         </div>
       </div>
 
-      <!-- Scene legend overlay (bottom-left) -->
-      <div class="legend-wrap">
-        <SceneLegend :belief-labels="beliefLabels" />
-      </div>
+      <!-- Event ticker banner (scripted mid-sim events) -->
+      <transition name="event-banner">
+        <div v-if="activeEventBanner" class="event-banner" :class="'k-' + activeEventBanner.kind">
+          <div class="eb-badge">
+            <span class="eb-pip"></span>
+            <span>{{ (activeEventBanner.kind || 'event').toUpperCase() }}</span>
+          </div>
+          <div class="eb-text">{{ activeEventBanner.text }}</div>
+          <div class="eb-tick mono">T{{ String(activeEventBanner.tick).padStart(2, '0') }}</div>
+        </div>
+      </transition>
+
+      <!-- Zone dashboard (bottom-left) — live macro view of each district -->
+      <aside class="zone-dashboard">
+        <div class="zd-head">
+          <span class="zd-title">CITY · LIVE STATE</span>
+          <span class="zd-tick mono">T{{ String(currentTick).padStart(2, '0') }}</span>
+        </div>
+        <div class="zd-body">
+          <div v-for="z in zoneStats" :key="z.name" class="zrow" :class="{ active: z.informed > 0 }">
+            <div class="zrow-head">
+              <span class="zrow-dot" :style="{ background: zoneColor(z.name) }"></span>
+              <span class="zrow-name">{{ z.name }}</span>
+              <span class="zrow-count mono">{{ z.informed }}/{{ z.total }}</span>
+            </div>
+            <div class="zrow-bar">
+              <div class="zrow-fill" :style="{
+                  width: (z.total ? (z.informed / z.total) * 100 : 0) + '%',
+                  background: zoneColor(z.name),
+                }"></div>
+            </div>
+            <div v-if="z.dominant" class="zrow-stance">
+              <span class="zst-track">
+                <span class="zst-zero"></span>
+                <span class="zst-fill" :style="{
+                    left: z.dominant.value >= 0 ? '50%' : (50 - Math.min(1, Math.abs(z.dominant.value)) * 50) + '%',
+                    width: (Math.min(1, Math.abs(z.dominant.value)) * 50) + '%',
+                    background: narrativeHexColor(z.dominant.narrative),
+                  }"></span>
+              </span>
+              <span class="zst-lbl mono" :style="{ color: narrativeHexColor(z.dominant.narrative) }">
+                {{ shortNarrative(z.dominant.narrative) }}
+                {{ (z.dominant.value >= 0 ? '+' : '') + z.dominant.value.toFixed(2) }}
+              </span>
+            </div>
+            <div v-else class="zrow-stance zrow-quiet">— no formed opinion</div>
+          </div>
+        </div>
+        <div class="zd-legend">
+          <span v-for="(n, i) in beliefLabels" :key="n" class="zd-leg">
+            <span class="zd-leg-dot" :style="{ background: narrativeHexColor(n) }"></span>
+            {{ shortNarrative(n) }}
+          </span>
+        </div>
+      </aside>
 
       <!-- Agent info panel (left drawer) -->
       <div class="agent-panel-wrap">
         <AgentInfoPanel
           :agent="selectedAgent"
           :narratives="narrativeMap"
+          :sim-id="currentSimId"
           @close="closeAgentPanel"
         />
       </div>
@@ -72,11 +126,74 @@
         <div class="drawer-scroll">
           <div class="drawer-section">
             <div class="drawer-label">DEBRIEF</div>
-            <div v-if="report?.narrative" class="drawer-summary">{{ report.narrative }}</div>
-            <div v-else class="drawer-pending">
+            <div v-if="!report" class="drawer-pending">
               <span class="pulse"></span>
               The simulation is still running. The debrief will synthesize once all {{ totalTicks }} ticks complete.
             </div>
+            <template v-else>
+              <div class="debrief-tabs">
+                <button
+                  v-for="t in debriefTabs"
+                  :key="t.id"
+                  class="dtab"
+                  :class="{ active: debriefTab === t.id }"
+                  @click="debriefTab = t.id"
+                >{{ t.label }}<span v-if="t.count" class="dtab-n mono">·{{ t.count }}</span></button>
+              </div>
+
+              <div v-if="debriefTab === 'sections'" class="debrief-sections">
+                <template v-if="report.sections?.length">
+                  <div v-for="(s, i) in report.sections" :key="i" class="debrief-section">
+                    <div class="debrief-section-title">{{ s.title }}</div>
+                    <div class="debrief-section-body">{{ s.content }}</div>
+                  </div>
+                </template>
+                <div v-else class="drawer-summary">{{ report.narrative || 'No summary available.' }}</div>
+              </div>
+
+              <div v-if="debriefTab === 'chain'" class="debrief-list">
+                <div v-if="!report.convert_chain?.length" class="drawer-empty">No chain recorded.</div>
+                <div v-for="(c, i) in report.convert_chain" :key="i" class="chain-row">
+                  <span class="chain-tick mono">T{{ String(c.tick).padStart(2, '0') }}</span>
+                  <span class="chain-name">{{ c.informer_name }}</span>
+                  <span class="chain-arrow">→</span>
+                  <span class="chain-name">{{ c.agent_name }}</span>
+                </div>
+              </div>
+
+              <div v-if="debriefTab === 'dissent'" class="debrief-list">
+                <div v-if="!report.dissenters?.length" class="drawer-empty">No significant dissenters.</div>
+                <div v-for="(d, i) in report.dissenters" :key="i" class="dissent-card">
+                  <div class="dissent-head">
+                    <span class="dissent-name">{{ d.name }}</span>
+                    <span class="dissent-zone mono">· {{ d.zone }} · {{ d.archetype }}</span>
+                  </div>
+                  <div v-if="d.bio" class="dissent-bio">{{ d.bio }}</div>
+                  <div class="dissent-metric">
+                    <span class="mono dissent-key">{{ d.narrative?.replace(/_/g, ' ') }}</span>
+                    <span class="dissent-stance" :class="d.stance >= 0 ? 'pos' : 'neg'">stance {{ (d.stance >= 0 ? '+' : '') + d.stance.toFixed(2) }}</span>
+                    <span class="dissent-vs mono">vs zone {{ (d.zone_mean >= 0 ? '+' : '') + d.zone_mean.toFixed(2) }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="debriefTab === 'turning'" class="debrief-list">
+                <div v-if="!report.turning_points?.length" class="drawer-empty">No sharp turning points.</div>
+                <div v-for="(p, i) in report.turning_points" :key="i" class="turning-row">
+                  <span class="chain-tick mono">T{{ String(p.tick).padStart(2, '0') }}</span>
+                  <div class="turning-body">
+                    <div class="turning-head">
+                      <span class="turning-zone">{{ p.zone }}</span>
+                      <span class="turning-narr mono">{{ p.narrative?.replace(/_/g, ' ') }}</span>
+                    </div>
+                    <div class="turning-delta">
+                      Δ {{ (p.delta >= 0 ? '+' : '') + p.delta.toFixed(2) }}
+                      <span class="turning-sub mono">{{ (p.value_before >= 0 ? '+' : '') + p.value_before.toFixed(2) }} → {{ (p.value_after >= 0 ? '+' : '') + p.value_after.toFixed(2) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
 
           <div class="drawer-section">
@@ -201,16 +318,19 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { CityScene } from '../components/spatial/CityScene.js'
 import ScenarioPicker from '../components/spatial/ScenarioPicker.vue'
 import AgentInfoPanel from '../components/spatial/AgentInfoPanel.vue'
-import SceneLegend from '../components/spatial/SceneLegend.vue'
+// SceneLegend replaced by inline ZoneDashboard — kept file for possible reuse
 import {
   getSpatialScenarios,
   startSpatialSim,
   getSpatialState,
   getSpatialReport,
+  listSpatialRuns,
+  loadSpatialRun,
 } from '../api/spatial.js'
 
 const phase = ref('pick') // pick | play
 const scenarios = ref([])
+const previousRuns = ref([])
 const zones = ref([])
 const grid = ref({ w: 60, h: 40 })
 const totalTicks = ref(50)
@@ -231,9 +351,16 @@ const report = ref(null)
 const isPlaying = ref(true)
 const speeds = [0.5, 1, 2, 4]
 const playSpeed = ref(1)
-const BASE_TICKS_PER_SECOND = 5
+const BASE_TICKS_PER_SECOND = 50 / 30  // 50 ticks in ~30s at 1× — cinematic pacing
 
 const drawerOpen = ref(true)
+const debriefTab = ref('sections')
+const debriefTabs = computed(() => [
+  { id: 'sections', label: 'Analysis', count: report.value?.sections?.length || 0 },
+  { id: 'chain',    label: 'Chain',    count: report.value?.convert_chain?.length || 0 },
+  { id: 'dissent',  label: 'Dissent',  count: report.value?.dissenters?.length || 0 },
+  { id: 'turning',  label: 'Turns',    count: report.value?.turning_points?.length || 0 },
+])
 
 const canvasRef = ref(null)
 let scene = null
@@ -266,6 +393,54 @@ const statusLabel = computed(() => {
 const currentSnapshot = computed(() => snapshotsByTick.value.get(currentTick.value) || null)
 const totalAgents = computed(() => currentSnapshot.value?.agents?.length ?? 0)
 const informedCount = computed(() => currentSnapshot.value?.agents?.filter((a) => a.knows).length ?? 0)
+
+/* ---------------- Zone dashboard (live macro view) ---------------- */
+const NARRATIVE_HEX = ['#ef4444', '#facc15', '#3b82f6', '#10b981', '#a855f7']
+function narrativeHexColor(name) {
+  const idx = beliefLabels.value.indexOf(name)
+  return NARRATIVE_HEX[idx >= 0 ? idx % NARRATIVE_HEX.length : 0]
+}
+function shortNarrative(n) {
+  if (!n) return ''
+  return String(n).replace(/_/g, ' ').toUpperCase()
+}
+const zoneStats = computed(() => {
+  const zones = ['Government', 'University', 'Market', 'Industrial', 'Residential', 'Park']
+  const out = zones.map((name) => ({
+    name,
+    total: 0,
+    informed: 0,
+    stanceSum: {},
+    count: 0,
+  }))
+  const snap = currentSnapshot.value
+  if (snap && snap.agents) {
+    const byName = new Map(out.map((z) => [z.name, z]))
+    for (const a of snap.agents) {
+      const z = byName.get(a.zone)
+      if (!z) continue
+      z.total += 1
+      z.count += 1
+      if (a.knows) z.informed += 1
+      if (a.stances) {
+        for (const [n, v] of Object.entries(a.stances)) {
+          z.stanceSum[n] = (z.stanceSum[n] || 0) + Number(v || 0)
+        }
+      }
+    }
+  }
+  return out.map((z) => {
+    const means = {}
+    for (const [n, sum] of Object.entries(z.stanceSum)) {
+      means[n] = z.count > 0 ? sum / z.count : 0
+    }
+    const entries = Object.entries(means)
+    entries.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    const top = entries[0]
+    const dominant = top && Math.abs(top[1]) >= 0.08 ? { narrative: top[0], value: top[1] } : null
+    return { name: z.name, total: z.total, informed: z.informed, dominant, means }
+  })
+})
 const loadedPct = computed(() => totalTicks.value ? Math.max(0, (loadedMaxTick.value / totalTicks.value) * 100) : 0)
 const playedPct = computed(() => totalTicks.value ? (currentTick.value / totalTicks.value) * 100 : 0)
 const beliefLabels = computed(() => currentScenario.value?.narratives ?? [])
@@ -316,6 +491,44 @@ const storyBeats = computed(() => {
   }
 
   for (const snap of snaps) {
+    // Phase 4: scripted events from snapshot
+    for (const ev of snap.events || []) {
+      out.push({
+        tick: snap.tick,
+        kind: 'event',
+        zone: ev.zone,
+        text: ev.text || `${ev.kind} in ${ev.zone || 'city'}`,
+      })
+    }
+    // Phase 4: journalist dispatches
+    for (const ds of snap.dispatches || []) {
+      out.push({
+        tick: snap.tick,
+        kind: 'dispatch',
+        text: ds.text ? `Dispatch: ${ds.text}` : 'Journalist dispatch filed.',
+      })
+    }
+    // Phase 2: LLM dialogs
+    for (const d of snap.dialogs || []) {
+      out.push({
+        tick: d.landed_at ?? snap.tick,
+        kind: 'dialog',
+        text: d.summary ? `${d.a_name} ↔ ${d.b_name}: ${d.summary}` : `${d.a_name} and ${d.b_name} discuss ${d.narrative?.replace(/_/g, ' ') || 'the news'}.`,
+      })
+    }
+    // Phase 5: migrations
+    for (const m of snap.migrations || []) {
+      if (m.reason === 'migration') {
+        const ag = agentIndex.value.get(m.agent_id)
+        const name = ag?.name || m.agent_id
+        out.push({
+          tick: snap.tick,
+          kind: 'migration',
+          text: `${name} crosses from ${m.from_zone} into ${m.to_zone}, drawn by conviction.`,
+        })
+      }
+    }
+
     const flipsByZone = new Map()
     for (const a of snap.agents) {
       // First-contact in a zone
@@ -400,6 +613,17 @@ const storyBeats = computed(() => {
     }
   }
   return out.sort((a, b) => a.tick - b.tick)
+})
+
+const activeEventBanner = computed(() => {
+  // Show the most recent scripted event within a 4-tick window so it lingers visibly
+  const candidates = storyBeats.value.filter(
+    (b) => (b.kind === 'event' || b.kind === 'dispatch') &&
+           b.tick <= currentTick.value &&
+           currentTick.value - b.tick <= 4
+  )
+  if (!candidates.length) return null
+  return candidates[candidates.length - 1]
 })
 
 const activeBeat = computed(() => {
@@ -585,10 +809,94 @@ async function resetAll() {
   currentTick.value = 0
   simStatus.value = 'loading'
   phase.value = 'pick'
+  loadPreviousRuns()
+}
+
+async function loadPreviousRuns() {
+  try {
+    const r = await listSpatialRuns()
+    previousRuns.value = r?.runs || []
+  } catch (e) {
+    console.warn('Failed to list runs', e)
+    previousRuns.value = []
+  }
+}
+
+async function replayRun(simId) {
+  // Hydrate a persisted sim without hitting any LLM endpoints
+  currentScenario.value = null
+  snapshotsByTick.value = new Map()
+  thoughts.value = []
+  agentIndex.value = new Map()
+  currentTick.value = 0
+  loadedMaxTick.value = -1
+  report.value = null
+  simStatus.value = 'loading'
+  isPlaying.value = true
+  playSpeed.value = 1
+  drawerOpen.value = true
+  phase.value = 'play'
+
+  let payload
+  try {
+    payload = await loadSpatialRun(simId)
+  } catch (e) {
+    console.error('Replay load failed', e)
+    phase.value = 'pick'
+    return
+  }
+
+  currentSimId.value = payload.simulation_id
+  // Pick matching scenario from already-loaded list (gives us narratives + narrative_map)
+  const scenarioId = payload.scenario_id
+  currentScenario.value = scenarios.value.find((s) => s.id === scenarioId) || {
+    id: scenarioId,
+    title: payload.report?.scenario_title || scenarioId,
+    narratives: [],
+  }
+
+  // Rebuild snapshotsByTick + thoughts + agentIndex from persisted snapshots
+  const snaps = payload.snapshots || []
+  for (const snap of snaps) {
+    snapshotsByTick.value.set(snap.tick, snap)
+    for (const a of snap.agents || []) {
+      if (!agentIndex.value.has(a.id)) {
+        agentIndex.value.set(a.id, { name: a.name, zone: a.zone })
+      } else {
+        agentIndex.value.get(a.id).zone = a.zone
+      }
+    }
+    for (const t of snap.new_thoughts || []) {
+      const ag = agentIndex.value.get(t.agent_id) || { name: t.agent_id, zone: '?' }
+      thoughts.value.push({
+        key: `${t.agent_id}-${t.tick}-${thoughts.value.length}`,
+        tick: t.tick,
+        name: ag.name,
+        zone: ag.zone,
+        text: t.text,
+      })
+    }
+  }
+  loadedMaxTick.value = snaps.length ? snaps[snaps.length - 1].tick : -1
+  report.value = payload.report
+  simStatus.value = 'done'
+
+  await nextTick()
+  await waitForCanvasSize(canvasRef)
+  if (scene) scene.dispose()
+  selectedAgent.value = null
+  scene = new CityScene()
+  scene.init(canvasRef.value, grid.value, zones.value)
+  scene.onAgentSelect = (a) => { selectedAgent.value = a }
+
+  startPlaybackLoop()
+  // Kick-render tick 0 immediately
+  if (snapshotsByTick.value.has(0)) renderTick(0)
 }
 
 onMounted(async () => {
   await loadScenarios()
+  loadPreviousRuns()  // fire-and-forget
 })
 
 onBeforeUnmount(() => {
@@ -789,12 +1097,145 @@ onBeforeUnmount(() => {
 .mono { font-family: 'JetBrains Mono', monospace; }
 
 /* Legend — bottom-left overlay */
-.legend-wrap {
+/* Zone dashboard — live macro view at bottom-left */
+.zone-dashboard {
   position: absolute;
-  bottom: 110px;
   left: 24px;
-  z-index: 2;
+  bottom: 108px;
+  width: 280px;
+  max-height: calc(100vh - 280px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(10, 14, 24, 0.78);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+  z-index: 3;
+  pointer-events: auto;
+  overflow: hidden;
 }
+.zd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.zd-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 2.4px;
+  font-weight: 700;
+  color: #ffc072;
+}
+.zd-tick { font-size: 13px; font-weight: 700; color: #ffffff; }
+.zd-body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.zd-body::-webkit-scrollbar { width: 4px; }
+.zd-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); }
+.zrow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0.55;
+  transition: opacity 0.25s;
+}
+.zrow.active { opacity: 1; }
+.zrow-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.zrow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+  flex-shrink: 0;
+}
+.zrow-name {
+  flex: 1;
+  color: #e6edf9;
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.2px;
+}
+.zrow-count { font-size: 10.5px; color: #94a3b8; font-weight: 700; }
+.zrow-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.zrow-fill {
+  height: 100%;
+  transition: width 0.35s ease;
+  box-shadow: 0 0 6px currentColor;
+}
+.zrow-stance {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.zst-track {
+  position: relative;
+  height: 4px;
+  flex: 1;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.zst-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.zst-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  transition: left 0.35s ease, width 0.35s ease;
+  box-shadow: 0 0 6px currentColor;
+}
+.zst-lbl {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  min-width: 82px;
+  text-align: right;
+  font-weight: 700;
+}
+.zrow-quiet {
+  font-size: 10px;
+  color: #475569;
+  font-style: italic;
+  padding-left: 2px;
+}
+.zd-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 9px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: #94a3b8;
+}
+.zd-leg { display: flex; align-items: center; gap: 5px; }
+.zd-leg-dot { width: 7px; height: 7px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
 
 /* Agent panel slot */
 .agent-panel-wrap {
@@ -988,6 +1429,10 @@ onBeforeUnmount(() => {
 .caption-kind.k-saturated { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.45); }
 .caption-kind.k-finished { background: rgba(59, 130, 246, 0.18); color: #93c5fd; border-color: rgba(59, 130, 246, 0.45); }
 .caption-kind.k-dark { background: rgba(100, 116, 139, 0.18); color: #cbd5e1; border-color: rgba(100, 116, 139, 0.4); }
+.caption-kind.k-event { background: rgba(34, 211, 238, 0.15); color: #67e8f9; border-color: rgba(34, 211, 238, 0.45); }
+.caption-kind.k-dispatch { background: rgba(249, 115, 22, 0.18); color: #fdba74; border-color: rgba(249, 115, 22, 0.45); }
+.caption-kind.k-dialog { background: rgba(244, 114, 182, 0.18); color: #fbcfe8; border-color: rgba(244, 114, 182, 0.4); }
+.caption-kind.k-migration { background: rgba(20, 184, 166, 0.18); color: #5eead4; border-color: rgba(20, 184, 166, 0.4); }
 .caption-text {
   flex: 1;
   font-size: 14.5px;
@@ -1034,6 +1479,10 @@ onBeforeUnmount(() => {
 .chapter.k-saturated { background: #10b981; border-color: #10b981; }
 .chapter.k-finished { background: #3b82f6; border-color: #3b82f6; }
 .chapter.k-dark { background: #64748b; border-color: #64748b; }
+.chapter.k-event { background: #22d3ee; border-color: #22d3ee; }
+.chapter.k-dispatch { background: #f97316; border-color: #f97316; }
+.chapter.k-dialog { background: #f472b6; border-color: #f472b6; }
+.chapter.k-migration { background: #14b8a6; border-color: #14b8a6; }
 
 /* Story beats list in drawer */
 .beats { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; padding-right: 2px; }
@@ -1064,6 +1513,10 @@ onBeforeUnmount(() => {
 .beat.k-saturated { border-left-color: #10b981; }
 .beat.k-finished { border-left-color: #3b82f6; }
 .beat.k-dark { border-left-color: #64748b; }
+.beat.k-event { border-left-color: #22d3ee; }
+.beat.k-dispatch { border-left-color: #f97316; }
+.beat.k-dialog { border-left-color: #f472b6; }
+.beat.k-migration { border-left-color: #14b8a6; }
 .beat-tick { font-size: 11px; color: #ffc072; font-weight: 700; padding-top: 1px; }
 .beat-kind {
   font-family: 'JetBrains Mono', monospace;
@@ -1222,4 +1675,173 @@ onBeforeUnmount(() => {
   color: #94a3b8;
   font-family: 'JetBrains Mono', monospace;
 }
+
+/* Event ticker banner — top of screen */
+.event-banner {
+  position: absolute;
+  left: 50%;
+  top: 100px;
+  transform: translateX(-50%);
+  max-width: 860px;
+  min-width: 440px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  background: linear-gradient(180deg, rgba(8, 18, 28, 0.92), rgba(8, 18, 28, 0.78));
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 10px;
+  z-index: 4;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 0 24px rgba(34, 211, 238, 0.12);
+}
+.event-banner.k-dispatch {
+  border-color: rgba(249, 115, 22, 0.45);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45), 0 0 24px rgba(249, 115, 22, 0.15);
+}
+.eb-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  color: #22d3ee;
+  padding: 3px 9px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.event-banner.k-dispatch .eb-badge { color: #fdba74; }
+.eb-pip {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pip 1.3s infinite;
+}
+.eb-text {
+  flex: 1;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: #f0f4ff;
+  line-height: 1.4;
+}
+.eb-tick { font-size: 13px; font-weight: 700; color: #ffc072; flex-shrink: 0; }
+.event-banner-enter-active { transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
+.event-banner-leave-active { transition: all 0.35s ease-in; }
+.event-banner-enter-from { opacity: 0; transform: translateX(-50%) translateY(-14px); }
+.event-banner-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+
+/* Debrief tabs */
+.debrief-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 8px;
+}
+.dtab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px 5px 0 0;
+  padding: 6px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 1.2px;
+  color: #94a3b8;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dtab:hover { color: #ffc072; }
+.dtab.active {
+  color: #ffc072;
+  border-color: rgba(255, 179, 71, 0.45);
+  background: rgba(255, 179, 71, 0.08);
+}
+.dtab-n { color: #475569; margin-left: 5px; font-weight: 500; }
+
+.debrief-sections { display: flex; flex-direction: column; gap: 14px; }
+.debrief-section {
+  background: rgba(255, 255, 255, 0.03);
+  border-left: 2px solid rgba(255, 179, 71, 0.5);
+  padding: 10px 14px;
+  border-radius: 4px;
+}
+.debrief-section-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 1.8px;
+  color: #ffc072;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.debrief-section-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+}
+
+.debrief-list { display: flex; flex-direction: column; gap: 6px; }
+.chain-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border-radius: 4px;
+  font-size: 12.5px;
+}
+.chain-tick { color: #ffc072; font-weight: 700; font-size: 11px; min-width: 34px; }
+.chain-name { color: #e6edf9; font-weight: 600; }
+.chain-arrow { color: #64748b; }
+.dissent-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 6px;
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.dissent-head { display: flex; align-items: baseline; gap: 8px; }
+.dissent-name { font-size: 13px; font-weight: 700; color: #fca5a5; }
+.dissent-zone { font-size: 10.5px; color: #94a3b8; }
+.dissent-bio { font-size: 12px; color: #cbd5e1; font-style: italic; line-height: 1.4; }
+.dissent-metric { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+.dissent-key { color: #94a3b8; letter-spacing: 1px; }
+.dissent-stance { color: #fca5a5; font-weight: 700; }
+.dissent-stance.pos { color: #86efac; }
+.dissent-stance.neg { color: #fca5a5; }
+.dissent-vs { color: #475569; }
+
+.turning-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border-left: 2px solid #22d3ee;
+  border-radius: 4px;
+}
+.turning-body { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.turning-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.turning-zone { color: #e6edf9; font-weight: 600; }
+.turning-narr { color: #8490a8; font-size: 10.5px; letter-spacing: 1px; text-transform: capitalize; }
+.turning-delta {
+  font-size: 12px;
+  color: #67e8f9;
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.turning-sub { color: #64748b; font-size: 10.5px; }
 </style>

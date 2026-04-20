@@ -586,20 +586,74 @@ export class CityScene {
         this.agents.delete(id)
       }
     }
-    // Paired radio-ripples at source + target — no cross-map arcs
-    if (Array.isArray(snapshot.transfers)) {
+    // Transfer effects: only render beams for first-contact flips (meaningful narrative moments).
+    // Continuous stance diffusion produces a transfer for every close pair every tick, so a
+    // naive render becomes a spider-web. Filter hard — ripples for flips only, beams likewise.
+    const flippedIds = new Set(
+      (snapshot.agents || [])
+        .filter((a) => a.flipped_this_tick)
+        .map((a) => a.id)
+    )
+    const journalistIds = new Set(
+      (snapshot.agents || [])
+        .filter((a) => a.archetype === "journalist")
+        .map((a) => a.id)
+    )
+    if (Array.isArray(snapshot.transfers) && flippedIds.size > 0) {
+      // For each newly-flipped agent, draw ONE beam from its informer (prefer a journalist source)
+      const byTarget = new Map()
       for (const t of snapshot.transfers) {
+        if (!flippedIds.has(t.to)) continue
+        const existing = byTarget.get(t.to)
+        // Prefer a journalist source if available
+        if (!existing || journalistIds.has(t.from)) {
+          byTarget.set(t.to, t)
+        }
+      }
+      let beamCount = 0
+      for (const t of byTarget.values()) {
         const from = this.agents.get(t.from)
         const to = this.agents.get(t.to)
         if (!from || !to) continue
         const colorHex = (this.beliefs.length >= 2 && t.belief === this.beliefs[1])
           ? BELIEF_HEAD_COLOR.b
           : BELIEF_HEAD_COLOR.a
-        this._spawnRipple(from.targetX, from.targetZ, colorHex, { strength: 0.7 })
+        this._spawnRipple(from.targetX, from.targetZ, colorHex, { strength: 0.5 })
         this._spawnRipple(to.targetX, to.targetZ, colorHex, { strength: 1.0, delay: 0.18 })
-        this._spawnBeam(from.targetX, from.targetZ, to.targetX, to.targetZ, colorHex)
+        if (beamCount < 4) {
+          this._spawnBeam(from.targetX, from.targetZ, to.targetX, to.targetZ, colorHex)
+          beamCount++
+        }
       }
     }
+
+    // Dialog speech-bubble sprites (Phase 2) — float between the two agents
+    if (Array.isArray(snapshot.dialogs)) {
+      for (const d of snapshot.dialogs) {
+        const a1 = this.agents.get(d.a_id)
+        const a2 = this.agents.get(d.b_id)
+        if (!a1 || !a2) continue
+        const colorHex = (this.beliefs.length >= 2 && d.narrative === this.beliefs[1])
+          ? BELIEF_HEAD_COLOR.b
+          : BELIEF_HEAD_COLOR.a
+        this._spawnSpeechBubble(
+          (a1.targetX + a2.targetX) / 2,
+          (a1.targetZ + a2.targetZ) / 2,
+          d.summary,
+          colorHex,
+        )
+      }
+    }
+
+    // Journalist dispatch chips (Phase 4) — rectangular press chip over the journalist
+    if (Array.isArray(snapshot.dispatches)) {
+      for (const ds of snapshot.dispatches) {
+        const j = this.agents.get(ds.journalist_id)
+        if (!j) continue
+        this._spawnDispatchChip(j.targetX, j.targetZ, ds.text)
+      }
+    }
+
     this._refreshSelectionRing()
   }
 
@@ -835,22 +889,27 @@ export class CityScene {
         : BELIEF_HEAD_COLOR.a
     }
     entry.headColor = headHex
-    entry.headMat.color.setHex(headHex)
-    // Continuous glow on informed agents — heavy flash on flip tick
-    if (a.knows) {
-      entry.headMat.emissive.setHex(headHex)
+    // Target color — animate loop lerps head material toward this for smooth transitions
+    entry.targetHeadColor = new THREE.Color(headHex)
+    const intensity = typeof a.intensity === "number" ? a.intensity : (a.knows ? 1.0 : 0.0)
+    if (a.knows && intensity > 0) {
       if (a.flipped_this_tick) {
+        entry.headMat.emissive.setHex(headHex)
         entry.headMat.emissiveIntensity = 3.2
         entry.flipDecay = 1.0
       } else {
-        entry.headMat.emissiveIntensity = Math.max(entry.headMat.emissiveIntensity || 1.3, 1.3)
+        entry.headMat.emissiveIntensity = Math.max(entry.headMat.emissiveIntensity || 0.6, 0.6 + intensity * 1.1)
+        // Allow lerp toward target color on emissive too
+        if (entry.headMat.emissive.getHex() === 0) entry.headMat.emissive.setHex(headHex)
       }
-      // Ground halo: colored pool of light beneath informed agents
+      // Ground halo: base opacity scales with intensity; animate loop adds a pulse
       entry.haloMat.color.setHex(headHex)
-      entry.haloMat.opacity = 0.22
+      entry.haloBase = 0.12 + intensity * 0.3
+      entry.haloMat.opacity = entry.haloBase
     } else {
       entry.headMat.emissive.setHex(0x000000)
       entry.headMat.emissiveIntensity = 0
+      entry.haloBase = 0
       entry.haloMat.opacity = 0
     }
   }
@@ -901,26 +960,164 @@ export class CityScene {
   }
 
   _spawnBeam(x0, z0, x1, z1, colorHex) {
-    // A low, thin, additive laser line between two agents — no curves
+    // Thin additive line between two agents — short, restrained, only shown for meaningful flips
     const dx = x1 - x0
     const dz = z1 - z0
     const len = Math.hypot(dx, dz)
-    if (len < 0.5 || len > 14) return // only local transfers get a beam
-    const geo = new THREE.PlaneGeometry(len, 0.12)
+    if (len < 0.5 || len > 12) return
+    const geo = new THREE.PlaneGeometry(len, 0.08)
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.55,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
     })
     const mesh = new THREE.Mesh(geo, mat)
-    mesh.position.set((x0 + x1) / 2, 1.0, (z0 + z1) / 2)
+    mesh.position.set((x0 + x1) / 2, 0.9, (z0 + z1) / 2)
     mesh.rotation.x = -Math.PI / 2
     mesh.rotation.z = -Math.atan2(dz, dx)
     this.scene.add(mesh)
-    this.flows.push({ mesh, mat, life: 0.65 })
+    this.flows.push({ mesh, mat, life: 0.4 })
+  }
+
+  _spawnSpeechBubble(x, z, text, colorHex) {
+    if (!text) return
+    this.bubbles = this.bubbles || []
+    this._enforceBubbleCap(1, "dialog")
+    const short = String(text).length > 90 ? String(text).slice(0, 87).trim() + "…" : String(text)
+    const { sprite, mat, tex } = this._makeTextSprite(short, {
+      bg: "rgba(10, 14, 24, 0.88)",
+      border: "#" + colorHex.toString(16).padStart(6, "0"),
+      textColor: "#f0f4ff",
+      accent: "#ffc072",
+      width: 360,
+      lineHeight: 26,
+      pad: 12,
+      maxWidth: 330,
+      fontSize: 17,
+    })
+    sprite.position.set(x, 3.6, z)
+    sprite.scale.set(4.2, 1.6, 1)
+    this.scene.add(sprite)
+    this.bubbles.push({ sprite, mat, tex, life: 1.8, riseSpeed: 0.6, kind: "dialog" })
+  }
+
+  _spawnDispatchChip(x, z, text) {
+    if (!text) return
+    this.bubbles = this.bubbles || []
+    this._enforceBubbleCap(1, "dispatch")
+    const short = String(text).length > 120 ? String(text).slice(0, 117).trim() + "…" : String(text)
+    const { sprite, mat, tex } = this._makeTextSprite(short, {
+      bg: "rgba(234, 88, 12, 0.92)",
+      border: "#ffc072",
+      textColor: "#0a0e18",
+      accent: "#0a0e18",
+      label: "PRESS",
+      width: 380,
+      lineHeight: 22,
+      pad: 12,
+      maxWidth: 350,
+      fontSize: 15,
+    })
+    sprite.position.set(x, 4.2, z)
+    sprite.scale.set(4.6, 1.8, 1)
+    this.scene.add(sprite)
+    this.bubbles.push({ sprite, mat, tex, life: 2.4, riseSpeed: 0.45, kind: "dispatch" })
+  }
+
+  _enforceBubbleCap(maxPerKind, kind) {
+    if (!this.bubbles) return
+    const sameKind = this.bubbles.filter((b) => b.kind === kind)
+    while (sameKind.length >= maxPerKind) {
+      const oldest = sameKind.shift()
+      const idx = this.bubbles.indexOf(oldest)
+      if (idx >= 0) {
+        this.scene.remove(oldest.sprite)
+        oldest.mat?.dispose?.()
+        oldest.tex?.dispose?.()
+        this.bubbles.splice(idx, 1)
+      }
+    }
+  }
+
+  _makeTextSprite(text, opts) {
+    const canvas = document.createElement("canvas")
+    const width = opts.width || 400
+    const maxWidth = opts.maxWidth || width - 40
+    const lineHeight = opts.lineHeight || 32
+    const pad = opts.pad || 14
+    const fontSize = opts.fontSize || 22
+    const ctx = canvas.getContext("2d")
+    ctx.font = `600 ${fontSize}px Inter, sans-serif`
+
+    // Word-wrap
+    const words = String(text).split(/\s+/).filter(Boolean)
+    const lines = []
+    let cur = ""
+    for (const w of words) {
+      const test = cur ? cur + " " + w : w
+      if (ctx.measureText(test).width > maxWidth && cur) {
+        lines.push(cur)
+        cur = w
+      } else {
+        cur = test
+      }
+    }
+    if (cur) lines.push(cur)
+    const labelH = opts.label ? 22 : 0
+    const bodyH = lines.length * lineHeight
+    const height = pad * 2 + labelH + bodyH
+
+    canvas.width = width
+    canvas.height = height
+
+    // Background
+    const g = ctx.createLinearGradient(0, 0, 0, height)
+    g.addColorStop(0, opts.bg || "rgba(10, 14, 24, 0.92)")
+    g.addColorStop(1, opts.bg || "rgba(10, 14, 24, 0.82)")
+    ctx.fillStyle = g
+    this._roundRect(ctx, 2, 2, width - 4, height - 4, 14)
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = opts.border || "#ffc072"
+    this._roundRect(ctx, 2, 2, width - 4, height - 4, 14)
+    ctx.stroke()
+
+    let y = pad
+    if (opts.label) {
+      ctx.fillStyle = opts.accent || "#ffc072"
+      ctx.font = "700 13px 'JetBrains Mono', monospace"
+      ctx.textAlign = "left"
+      ctx.textBaseline = "top"
+      ctx.fillText(opts.label, pad, y)
+      y += labelH
+    }
+    ctx.fillStyle = opts.textColor || "#f0f4ff"
+    ctx.font = `600 ${fontSize}px Inter, sans-serif`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "top"
+    for (const line of lines) {
+      ctx.fillText(line, pad, y)
+      y += lineHeight
+    }
+
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.anisotropy = 4
+    tex.needsUpdate = true
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      opacity: 1,
+      depthTest: false,
+      depthWrite: false,
+    })
+    const sprite = new THREE.Sprite(mat)
+    sprite.renderOrder = 999
+    // Scale carries a default aspect ratio that caller will overwrite
+    sprite.scale.set(width / 60, height / 60, 1)
+    return { sprite, mat, tex }
   }
 
   _animate = () => {
@@ -936,8 +1133,15 @@ export class CityScene {
     // Agents: lerp toward target, gentle bob + walk sway
     for (const entry of this.agents.values()) {
       const cur = entry.group.position
-      cur.x += (entry.targetX - cur.x) * 0.12
-      cur.z += (entry.targetZ - cur.z) * 0.12
+      cur.x += (entry.targetX - cur.x) * 0.09
+      cur.z += (entry.targetZ - cur.z) * 0.09
+      // Smooth head color transition (prevent red↔yellow snaps between ticks)
+      if (entry.targetHeadColor) {
+        entry.headMat.color.lerp(entry.targetHeadColor, 0.08)
+        if (entry.headMat.emissive.getHex() !== 0) {
+          entry.headMat.emissive.lerp(entry.targetHeadColor, 0.08)
+        }
+      }
       const speed = Math.hypot(entry.targetX - cur.x, entry.targetZ - cur.z)
       entry.walkPhase += dt * (4 + speed * 2)
       const bob = Math.sin(entry.walkPhase) * 0.05
@@ -954,16 +1158,35 @@ export class CityScene {
         const baseline = entry.headMat.emissive.getHex() === 0 ? 0 : 1.3
         entry.headMat.emissiveIntensity = Math.max(baseline, entry.flipDecay * 3.4)
       }
-      // Halo pulse for informed agents
-      if (entry.haloMat.opacity > 0) {
-        const base = 0.22 + Math.sin(t * 2.4 + entry.walkPhase) * 0.06
-        entry.haloMat.opacity = base
+      // Halo pulse — base opacity is driven by stance intensity (set in _applyAgentColor)
+      if (entry.haloBase && entry.haloBase > 0) {
+        const pulse = Math.sin(t * 2.4 + entry.walkPhase) * 0.06
+        entry.haloMat.opacity = Math.max(0, entry.haloBase + pulse)
         const hs = 1 + Math.sin(t * 1.8 + entry.walkPhase) * 0.06
         entry.halo.scale.set(hs, hs, hs)
       }
     }
 
-    // Transfer beams — short fade
+    // Speech bubbles + dispatch chips: float up, face camera, fade
+    if (this.bubbles && this.bubbles.length) {
+      for (let i = this.bubbles.length - 1; i >= 0; i--) {
+        const b = this.bubbles[i]
+        b.life -= dt
+        b.sprite.position.y += b.riseSpeed * dt
+        if (b.life <= 0) {
+          this.scene.remove(b.sprite)
+          b.mat.dispose()
+          b.tex.dispose()
+          this.bubbles.splice(i, 1)
+          continue
+        }
+        // Fade out over the last half-second
+        const fade = b.life > 0.5 ? 1.0 : Math.max(0, b.life / 0.5)
+        b.mat.opacity = fade
+      }
+    }
+
+    // Transfer beams — short fade (life starts at 0.4s)
     for (let i = this.flows.length - 1; i >= 0; i--) {
       const f = this.flows[i]
       f.life -= dt
@@ -974,8 +1197,8 @@ export class CityScene {
         this.flows.splice(i, 1)
         continue
       }
-      const k = Math.max(0, f.life / 0.65)
-      f.mat.opacity = 0.85 * k * k
+      const k = Math.max(0, f.life / 0.4)
+      f.mat.opacity = 0.55 * k * k
     }
 
     // Ripples with optional delay + variable strength
@@ -1058,6 +1281,13 @@ export class CityScene {
     this.agents.clear()
     this.ripples = []
     this.flows = []
+    if (this.bubbles) {
+      for (const b of this.bubbles) {
+        b.mat?.dispose?.()
+        b.tex?.dispose?.()
+      }
+      this.bubbles = []
+    }
   }
 
   focusAgent(id) {

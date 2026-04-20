@@ -39,14 +39,39 @@
             <span v-for="n in s.narratives" :key="n" class="narr-chip">{{ n }}</span>
           </div>
           <div class="cta">
-            <span>RUN SIMULATION</span>
+            <span>NEW LLM RUN</span>
             <span class="arrow">→</span>
           </div>
         </button>
       </div>
 
+      <div v-if="previousRuns.length" class="prev-section">
+        <div class="prev-head">
+          <span class="prev-label">OR REPLAY A RECENT RUN · NO LLM CALLS</span>
+          <span class="prev-hint">Persisted at outputs/spatial/ — instant scrub, stance bars + interview work</span>
+        </div>
+        <div class="prev-list">
+          <button
+            v-for="r in previousRuns.slice(0, 6)"
+            :key="r.simulation_id"
+            class="prev-row"
+            @click="$emit('replay', r.simulation_id)"
+          >
+            <div class="prev-row-main">
+              <span class="prev-title">{{ r.scenario_title || r.scenario_id }}</span>
+              <span class="prev-id mono">{{ r.simulation_id }}</span>
+            </div>
+            <div class="prev-row-meta">
+              <span class="prev-chip mono">{{ r.snapshot_count - 1 }} ticks</span>
+              <span class="prev-when mono">{{ relTime(r.finished_at) }}</span>
+              <span class="prev-cta">PLAY →</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
       <div class="footer-note">
-        Built with Three.js · post-processed in real-time · 50 ticks of physics &amp; belief propagation
+        Built with Three.js · 50 ticks · LLM personas + dialogs + report · {{ previousRuns.length }} runs on disk
       </div>
     </div>
   </div>
@@ -56,8 +81,18 @@
 defineProps({
   scenarios: { type: Array, required: true },
   completedIds: { type: Array, default: () => [] },
+  previousRuns: { type: Array, default: () => [] },
 })
-defineEmits(['pick'])
+defineEmits(['pick', 'replay'])
+
+function relTime(epochSec) {
+  if (!epochSec) return ''
+  const delta = Date.now() / 1000 - Number(epochSec)
+  if (delta < 60) return `${Math.round(delta)}s ago`
+  if (delta < 3600) return `${Math.round(delta / 60)}m ago`
+  if (delta < 86400) return `${Math.round(delta / 3600)}h ago`
+  return `${Math.round(delta / 86400)}d ago`
+}
 </script>
 
 <style scoped>
@@ -262,6 +297,91 @@ defineEmits(['pick'])
   font-size: 16px;
 }
 .card:hover:not(.disabled) .arrow { transform: translateX(4px); }
+
+.prev-section {
+  margin-top: 36px;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.prev-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  text-align: left;
+}
+.prev-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 2.5px;
+  font-weight: 700;
+  color: #67e8f9;
+}
+.prev-hint {
+  font-size: 11.5px;
+  color: #8490a8;
+  letter-spacing: 0.3px;
+}
+.prev-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.prev-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 16px;
+  background: rgba(34, 211, 238, 0.04);
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: 8px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  transition: all 0.18s;
+}
+.prev-row:hover {
+  background: rgba(34, 211, 238, 0.1);
+  border-color: rgba(34, 211, 238, 0.5);
+  transform: translateY(-1px);
+}
+.prev-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.prev-title { color: #e6edf9; font-weight: 600; font-size: 13.5px; }
+.prev-id { color: #475569; font-size: 10.5px; }
+.prev-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.prev-chip {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 3px 8px;
+  border-radius: 3px;
+  color: #cbd5e1;
+  font-size: 10.5px;
+}
+.prev-when {
+  color: #64748b;
+  font-size: 10.5px;
+}
+.prev-cta {
+  color: #67e8f9;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+}
 
 .footer-note {
   text-align: center;

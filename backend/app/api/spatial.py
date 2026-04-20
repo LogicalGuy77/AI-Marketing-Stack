@@ -49,3 +49,31 @@ def report(sim_id: str):
     if rep is None:
         return jsonify({"error": "not_ready"}), 404
     return jsonify(rep)
+
+
+@spatial_bp.route("/<sim_id>/interview", methods=["POST"])
+def interview(sim_id: str):
+    body = request.get_json(silent=True) or {}
+    agent_id = body.get("agent_id")
+    question = (body.get("question") or "").strip()
+    if not agent_id or not question:
+        return jsonify({"error": "agent_id and question required"}), 400
+    result = spatial_runner.interview_agent(sim_id, agent_id, question)
+    if "error" in result:
+        return jsonify(result), 404
+    return jsonify(result)
+
+
+@spatial_bp.route("/runs", methods=["GET"])
+def list_runs():
+    """List persisted runs from outputs/spatial/ (newest first)."""
+    return jsonify({"runs": spatial_runner.list_persisted_runs()})
+
+
+@spatial_bp.route("/runs/<sim_id>", methods=["GET"])
+def load_run(sim_id: str):
+    """Load a persisted run's full payload (snapshots + report) without re-running."""
+    data = spatial_runner.load_persisted_run(sim_id)
+    if data is None:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(data)
