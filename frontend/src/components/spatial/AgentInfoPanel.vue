@@ -100,18 +100,15 @@ const beliefText = computed(() => {
 
 <style scoped>
 .agent-panel {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 320px;
-  max-width: calc(100% - 24px);
-  background: #ffffff;
-  border: 1px solid #d6dde8;
+  width: 100%;
+  background: rgba(10, 14, 24, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  z-index: 5;
   font-family: 'Inter', -apple-system, sans-serif;
+  color: #e6edf9;
 }
 .ap-head {
   display: flex;
@@ -165,8 +162,8 @@ const beliefText = computed(() => {
   padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  background: #f8fafc;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
 }
 .ap-row {
   display: grid;
@@ -175,8 +172,8 @@ const beliefText = computed(() => {
 }
 .ap-cell.wide { grid-column: 1 / -1; }
 .ap-cell {
-  background: #ffffff;
-  border: 1px solid #e5e9f0;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   padding: 9px 11px;
 }
@@ -184,11 +181,11 @@ const beliefText = computed(() => {
   font-family: 'JetBrains Mono', monospace;
   font-size: 9.5px;
   letter-spacing: 1.6px;
-  color: #64748b;
+  color: #ffc072;
   font-weight: 700;
   margin-bottom: 5px;
 }
-.ap-v { font-size: 13px; color: #0f172a; font-weight: 600; }
+.ap-v { font-size: 13px; color: #e6edf9; font-weight: 600; }
 .mono { font-family: 'JetBrains Mono', monospace; }
 .ap-pill {
   display: inline-flex;
@@ -201,36 +198,36 @@ const beliefText = computed(() => {
   font-weight: 700;
   letter-spacing: 0.8px;
 }
-.pill-info { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
-.pill-dark { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
-.pill-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.pill-info { background: rgba(22, 163, 74, 0.15); color: #86efac; border: 1px solid rgba(22, 163, 74, 0.4); }
+.pill-dark { background: rgba(255, 255, 255, 0.05); color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.08); }
+.pill-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px currentColor; }
 .ap-belief {
   border-left: 3px solid #ef4444;
-  padding: 6px 10px;
-  background: #fff;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.03);
   border-radius: 4px;
 }
 .ap-belief-key {
   font-size: 10.5px;
-  color: #475569;
+  color: #94a3b8;
   letter-spacing: 0.6px;
   margin-bottom: 4px;
 }
 .ap-belief-text {
   font-size: 12.5px;
-  color: #0f172a;
+  color: #cbd5e1;
   font-style: italic;
-  line-height: 1.45;
+  line-height: 1.5;
 }
 .ap-thought {
   font-size: 12.5px;
-  color: #0f172a;
+  color: #fde68a;
   font-style: italic;
-  line-height: 1.5;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  line-height: 1.55;
+  background: rgba(234, 88, 12, 0.1);
+  border: 1px solid rgba(234, 88, 12, 0.3);
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 
 .slide-enter-active, .slide-leave-active {

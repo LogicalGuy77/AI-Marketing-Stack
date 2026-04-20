@@ -1,60 +1,65 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js'
 
 // Zone theming: each zone has a palette and a builder that composes distinctive 3D structures.
 const ZONE_THEMES = {
   Government: {
-    accent: 0x2563eb,
-    wall: 0xe2e8f0,
-    roof: 0xcbd5e1,
-    ground: 0xcfd8e3,
+    accent: 0x3b82f6,
+    wall: 0x6b7799,
+    roof: 0x3d4a6a,
+    ground: 0x2c3450,
     build: buildGovernmentZone,
   },
   University: {
-    accent: 0x7c3aed,
-    wall: 0xd8b4fe,
-    roof: 0x7e22ce,
-    ground: 0xe4d7f5,
+    accent: 0xa855f7,
+    wall: 0x6b5684,
+    roof: 0x3e2f54,
+    ground: 0x2d2340,
     build: buildUniversityZone,
   },
   Market: {
-    accent: 0xea580c,
-    wall: 0xfde68a,
-    roof: 0xb45309,
-    ground: 0xf5e6c8,
+    accent: 0xf59e0b,
+    wall: 0x7a6338,
+    roof: 0x4d3a1a,
+    ground: 0x3a2c1a,
     build: buildMarketZone,
   },
   Industrial: {
-    accent: 0x4b5563,
-    wall: 0x6b7280,
-    roof: 0x374151,
-    ground: 0xced4de,
+    accent: 0x94a3b8,
+    wall: 0x525866,
+    roof: 0x34394a,
+    ground: 0x252a38,
     build: buildIndustrialZone,
   },
   Residential: {
-    accent: 0x059669,
-    wall: 0xfef3c7,
-    roof: 0x15803d,
-    ground: 0xcfe8d6,
+    accent: 0x10b981,
+    wall: 0x4f6455,
+    roof: 0x2c4034,
+    ground: 0x243329,
     build: buildResidentialZone,
   },
   Park: {
-    accent: 0x65a30d,
-    wall: 0x4d7c0f,
-    roof: 0x166534,
-    ground: 0xbde39a,
+    accent: 0x84cc16,
+    wall: 0x425a2e,
+    roof: 0x26361c,
+    ground: 0x253c1c,
     build: buildParkZone,
   },
 }
 
 const AGENT_BODY_COLOR = {
-  official:   0x1e3a8a,
-  student:    0x7e22ce,
-  vendor:     0xb45309,
-  worker:     0x374151,
-  citizen:    0x047857,
-  visitor:    0x4d7c0f,
-  journalist: 0xf3f4f6,
+  official:   0x4e7bc7,
+  student:    0xb77df3,
+  vendor:     0xeeba6a,
+  worker:     0x7a8497,
+  citizen:    0x45c48a,
+  visitor:    0xa3d65c,
+  journalist: 0xfafafa,
 }
 
 // Role display metadata: glyph, label, badge fill/text color
@@ -103,19 +108,26 @@ export class CityScene {
   }
 
   init(canvas, grid, zones) {
+    try {
+      this._init(canvas, grid, zones)
+    } catch (err) {
+      console.error('[CityScene init]', err)
+    }
+  }
+
+  _init(canvas, grid, zones) {
     this.canvas = canvas
     this.grid = grid
     this.zones = zones
 
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0xf4f6fb)
-    this.scene.fog = new THREE.FogExp2(0xe4e9f2, 0.0065)
+    this.scene.fog = new THREE.Fog(0x0a0e18, 70, 220)
 
     const w = canvas.clientWidth
     const h = canvas.clientHeight
-    this.camera = new THREE.PerspectiveCamera(42, w / h, 0.1, 600)
-    this.camera.position.set(grid.w * 1.05, 62, grid.h * 1.55)
-    this.camera.lookAt(grid.w / 2, 0, grid.h / 2)
+    this.camera = new THREE.PerspectiveCamera(35, w / h, 0.1, 800)
+    this.camera.position.set(grid.w * 0.9, 48, grid.h * 1.45)
+    this.camera.lookAt(grid.w / 2, 1, grid.h / 2)
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -123,32 +135,64 @@ export class CityScene {
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.1
+    this.renderer.toneMappingExposure = 1.02
 
     this.controls = new OrbitControls(this.camera, canvas)
     this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.08
-    this.controls.minDistance = 35
-    this.controls.maxDistance = 180
+    this.controls.dampingFactor = 0.07
+    this.controls.minDistance = 30
+    this.controls.maxDistance = 200
     this.controls.maxPolarAngle = Math.PI / 2.15
     this.controls.target.set(grid.w / 2, 0, grid.h / 2)
+    this.controls.autoRotate = true
+    this.controls.autoRotateSpeed = 0.25
 
+    this._userInteractedAt = 0
+    canvas.addEventListener('pointerdown', () => {
+      this.controls.autoRotate = false
+      this._userInteractedAt = performance.now()
+    })
+
+    this._setupSky()
     this._setupLights()
     this._setupGround()
     this._setupStreets()
     this._setupZones()
+    this._setupAtmosphere()
 
     this.agentGroup = new THREE.Group()
     this.scene.add(this.agentGroup)
     this.flowGroup = new THREE.Group()
     this.scene.add(this.flowGroup)
 
+    // Post-processing: render → bloom → SMAA → output
+    this.composer = new EffectComposer(this.renderer)
+    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.composer.setSize(w, h)
+    this.renderPass = new RenderPass(this.scene, this.camera)
+    this.composer.addPass(this.renderPass)
+    // Lower strength + higher threshold = only very bright emissives bloom
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.45, 0.7, 0.85)
+    this.composer.addPass(this.bloomPass)
+    const pr = Math.min(window.devicePixelRatio, 2)
+    this.smaaPass = new SMAAPass(w * pr, h * pr)
+    this.composer.addPass(this.smaaPass)
+    this.outputPass = new OutputPass()
+    this.composer.addPass(this.outputPass)
+
     this.resizeObserver = new ResizeObserver(() => this._resize())
-    this.resizeObserver.observe(canvas)
+    this.resizeObserver.observe(canvas.parentElement || canvas)
 
     this._bindPointerEvents()
 
     this.ready = true
+    console.log('[CityScene] ready', {
+      w: canvas.clientWidth,
+      h: canvas.clientHeight,
+      gridW: grid.w,
+      gridH: grid.h,
+      zones: (zones || []).length,
+    })
     this._animate()
   }
 
@@ -231,44 +275,129 @@ export class CityScene {
     return this._latestSnapshot.agents.find((a) => a.id === id) || null
   }
 
+  _setupSky() {
+    // Gradient dome sky — cinematic dusk: deep navy → amber horizon
+    const skyGeo = new THREE.SphereGeometry(400, 32, 16)
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        topColor:    { value: new THREE.Color(0x040610) },
+        midColor:    { value: new THREE.Color(0x1a1630) },
+        horizonColor:{ value: new THREE.Color(0x6a3820) },
+        offset:      { value: 0 },
+        exponent:    { value: 0.9 },
+      },
+      vertexShader: `
+        varying vec3 vWorld;
+        void main() {
+          vec4 wp = modelMatrix * vec4(position, 1.0);
+          vWorld = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 midColor;
+        uniform vec3 horizonColor;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorld;
+        void main() {
+          float h = normalize(vWorld + vec3(0.0, offset, 0.0)).y;
+          float t = clamp(h, 0.0, 1.0);
+          vec3 lower = mix(horizonColor, midColor, pow(t, exponent));
+          vec3 col = mix(lower, topColor, pow(t, 1.8));
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    })
+    const sky = new THREE.Mesh(skyGeo, skyMat)
+    sky.position.set(this.grid.w / 2, 0, this.grid.h / 2)
+    this.scene.add(sky)
+    this._sky = sky
+  }
+
   _setupLights() {
-    const hemi = new THREE.HemisphereLight(0xdfeaff, 0x8a7f70, 0.9)
+    // Warm hemi — dusk sky, warm ground bounce
+    const hemi = new THREE.HemisphereLight(0x96afe6, 0x5a3820, 0.62)
     this.scene.add(hemi)
 
-    const sun = new THREE.DirectionalLight(0xfff1cf, 1.6)
-    sun.position.set(80, 110, 40)
+    // Key sun — golden hour, richer falloff
+    const sun = new THREE.DirectionalLight(0xffbf82, 1.9)
+    sun.position.set(-60, 45, 90)
     sun.castShadow = true
     sun.shadow.mapSize.set(2048, 2048)
     sun.shadow.camera.left = -80
     sun.shadow.camera.right = 160
     sun.shadow.camera.top = 120
     sun.shadow.camera.bottom = -40
-    sun.shadow.bias = -0.0004
-    sun.shadow.normalBias = 0.05
+    sun.shadow.bias = -0.0003
+    sun.shadow.normalBias = 0.04
     this.scene.add(sun)
+    this._sun = sun
 
-    // Soft fill from the opposite side for daylight
-    const fill = new THREE.DirectionalLight(0xcfe3ff, 0.35)
-    fill.position.set(-40, 50, -20)
-    this.scene.add(fill)
+    // Cool rim light — silhouette separation
+    const rim = new THREE.DirectionalLight(0x8fa8ff, 0.85)
+    rim.position.set(80, 40, -60)
+    this.scene.add(rim)
+
+    const amb = new THREE.AmbientLight(0x5a6788, 0.22)
+    this.scene.add(amb)
   }
 
   _setupGround() {
+    // Dark, cinematic ground
     const g = new THREE.Mesh(
       new THREE.PlaneGeometry(this.grid.w * 3, this.grid.h * 3),
-      new THREE.MeshStandardMaterial({ color: 0xe6eaf1, roughness: 0.95, metalness: 0 })
+      new THREE.MeshStandardMaterial({
+        color: 0x1a1f2b,
+        roughness: 0.92,
+        metalness: 0.05,
+      })
     )
     g.rotation.x = -Math.PI / 2
     g.position.set(this.grid.w / 2, -0.05, this.grid.h / 2)
     g.receiveShadow = true
     this.scene.add(g)
 
-    // Subtle cool-grid underlay
-    const grid = new THREE.GridHelper(Math.max(this.grid.w, this.grid.h) * 2, 40, 0xb4bccc, 0xcbd3df)
+    // Subtle grid etched into the ground
+    const grid = new THREE.GridHelper(
+      Math.max(this.grid.w, this.grid.h) * 2,
+      40,
+      0x2a3246,
+      0x1f2534
+    )
     grid.position.set(this.grid.w / 2, 0.01, this.grid.h / 2)
-    grid.material.opacity = 0.45
+    grid.material.opacity = 0.6
     grid.material.transparent = true
     this.scene.add(grid)
+  }
+
+  _setupAtmosphere() {
+    // Sparse distant "star/city lights" on the horizon dome
+    const count = 220
+    const geo = new THREE.BufferGeometry()
+    const positions = new Float32Array(count * 3)
+    for (let i = 0; i < count; i++) {
+      const theta = Math.random() * Math.PI * 2
+      const radius = 250 + Math.random() * 100
+      const y = Math.random() * 60 + 10
+      positions[i * 3 + 0] = Math.cos(theta) * radius + this.grid.w / 2
+      positions[i * 3 + 1] = y
+      positions[i * 3 + 2] = Math.sin(theta) * radius + this.grid.h / 2
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    const mat = new THREE.PointsMaterial({
+      color: 0xffe0a8,
+      size: 1.1,
+      sizeAttenuation: true,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    })
+    const points = new THREE.Points(geo, mat)
+    this.scene.add(points)
   }
 
   _setupStreets() {
@@ -421,6 +550,14 @@ export class CityScene {
   }
 
   setState(snapshot, narrativeOrder = []) {
+    try {
+      this._setState(snapshot, narrativeOrder)
+    } catch (err) {
+      console.error('[CityScene setState]', err)
+    }
+  }
+
+  _setState(snapshot, narrativeOrder = []) {
     if (!this.ready || !snapshot) return
     this._latestSnapshot = snapshot
     this.beliefs = narrativeOrder
@@ -449,7 +586,7 @@ export class CityScene {
         this.agents.delete(id)
       }
     }
-    // Spawn arc arrows for this tick's information transfers
+    // Paired radio-ripples at source + target — no cross-map arcs
     if (Array.isArray(snapshot.transfers)) {
       for (const t of snapshot.transfers) {
         const from = this.agents.get(t.from)
@@ -458,7 +595,9 @@ export class CityScene {
         const colorHex = (this.beliefs.length >= 2 && t.belief === this.beliefs[1])
           ? BELIEF_HEAD_COLOR.b
           : BELIEF_HEAD_COLOR.a
-        this._spawnFlow(from.targetX, from.targetZ, to.targetX, to.targetZ, colorHex)
+        this._spawnRipple(from.targetX, from.targetZ, colorHex, { strength: 0.7 })
+        this._spawnRipple(to.targetX, to.targetZ, colorHex, { strength: 1.0, delay: 0.18 })
+        this._spawnBeam(from.targetX, from.targetZ, to.targetX, to.targetZ, colorHex)
       }
     }
     this._refreshSelectionRing()
@@ -470,28 +609,43 @@ export class CityScene {
     const isJournalist = a.archetype === 'journalist'
 
     // Body (torso)
-    const bodyGeo = new THREE.CapsuleGeometry(0.28, 0.5, 4, 10)
+    const bodyGeo = new THREE.CapsuleGeometry(0.32, 0.6, 4, 10)
     const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.55, metalness: 0.1 })
     const body = new THREE.Mesh(bodyGeo, bodyMat)
-    body.position.y = 0.55
+    body.position.y = 0.62
     body.castShadow = true
     body.userData.agentId = a.id
     group.add(body)
 
     // Head
-    const headGeo = new THREE.SphereGeometry(0.25, 16, 12)
+    const headGeo = new THREE.SphereGeometry(0.36, 20, 14)
     const headMat = new THREE.MeshStandardMaterial({
       color: BELIEF_HEAD_COLOR.uninformed,
       emissive: 0x000000,
       emissiveIntensity: 0,
-      roughness: 0.4,
-      metalness: 0.2,
+      roughness: 0.35,
+      metalness: 0.25,
     })
     const head = new THREE.Mesh(headGeo, headMat)
-    head.position.y = 1.15
+    head.position.y = 1.32
     head.castShadow = true
     head.userData.agentId = a.id
     group.add(head)
+
+    // Ground halo disc — appears when informed (colored pool of light)
+    const haloGeo = new THREE.CircleGeometry(1.1, 36)
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    const halo = new THREE.Mesh(haloGeo, haloMat)
+    halo.rotation.x = -Math.PI / 2
+    halo.position.y = 0.03
+    group.add(halo)
 
     // Journalists get a little camera prop on a shoulder
     if (isJournalist) {
@@ -551,8 +705,10 @@ export class CityScene {
       group,
       bodyMat,
       headMat,
+      haloMat,
       body,
       head,
+      halo,
       badge,
       label,
       selectRing,
@@ -572,6 +728,8 @@ export class CityScene {
         bodyMat.dispose()
         headGeo.dispose()
         headMat.dispose()
+        haloGeo.dispose()
+        haloMat.dispose()
         ringGeo.dispose()
         ringMat.dispose()
         proxyGeo.dispose()
@@ -678,10 +836,22 @@ export class CityScene {
     }
     entry.headColor = headHex
     entry.headMat.color.setHex(headHex)
-    if (a.flipped_this_tick) {
+    // Continuous glow on informed agents — heavy flash on flip tick
+    if (a.knows) {
       entry.headMat.emissive.setHex(headHex)
-      entry.headMat.emissiveIntensity = 2.0
-      entry.flipDecay = 1.0
+      if (a.flipped_this_tick) {
+        entry.headMat.emissiveIntensity = 3.2
+        entry.flipDecay = 1.0
+      } else {
+        entry.headMat.emissiveIntensity = Math.max(entry.headMat.emissiveIntensity || 1.3, 1.3)
+      }
+      // Ground halo: colored pool of light beneath informed agents
+      entry.haloMat.color.setHex(headHex)
+      entry.haloMat.opacity = 0.22
+    } else {
+      entry.headMat.emissive.setHex(0x000000)
+      entry.headMat.emissiveIntensity = 0
+      entry.haloMat.opacity = 0
     }
   }
 
@@ -710,24 +880,56 @@ export class CityScene {
     this.flows.push({ curve, line, lineMat, lineGeo, dot, dotGeo, dotMat, t: 0, life: 1.6 })
   }
 
-  _spawnRipple(x, z, colorHex) {
-    const geo = new THREE.RingGeometry(0.6, 0.78, 32)
+  _spawnRipple(x, z, colorHex, opts = {}) {
+    const strength = opts.strength ?? 1.0
+    const delay = opts.delay ?? 0
+    // Inner solid ring
+    const geo = new THREE.RingGeometry(0.5, 0.72, 48)
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,
       transparent: true,
-      opacity: 0.95,
+      opacity: 0.9 * strength,
       side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     })
     const mesh = new THREE.Mesh(geo, mat)
     mesh.rotation.x = -Math.PI / 2
     mesh.position.set(x, 0.08, z)
     this.scene.add(mesh)
-    this.ripples.push({ mesh, life: 1.0 })
+    this.ripples.push({ mesh, life: 1.2, delay, strength })
+  }
+
+  _spawnBeam(x0, z0, x1, z1, colorHex) {
+    // A low, thin, additive laser line between two agents — no curves
+    const dx = x1 - x0
+    const dz = z1 - z0
+    const len = Math.hypot(dx, dz)
+    if (len < 0.5 || len > 14) return // only local transfers get a beam
+    const geo = new THREE.PlaneGeometry(len, 0.12)
+    const mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.position.set((x0 + x1) / 2, 1.0, (z0 + z1) / 2)
+    mesh.rotation.x = -Math.PI / 2
+    mesh.rotation.z = -Math.atan2(dz, dx)
+    this.scene.add(mesh)
+    this.flows.push({ mesh, mat, life: 0.65 })
   }
 
   _animate = () => {
     this.raf = requestAnimationFrame(this._animate)
     if (!this.ready) return
+    try { this._renderFrame() } catch (err) { console.error('[CityScene render]', err) }
+  }
+
+  _renderFrame() {
     const t = this.clock.getElapsedTime()
     const dt = Math.min(0.05, this.clock.getDelta())
 
@@ -746,39 +948,41 @@ export class CityScene {
         const angle = Math.atan2(entry.targetX - cur.x, entry.targetZ - cur.z)
         entry.group.rotation.y += (angle - entry.group.rotation.y) * 0.2
       }
-      // Emissive decay
+      // Emissive decay — settles to steady-state glow for informed, zero for uninformed
       if (entry.flipDecay > 0) {
-        entry.flipDecay -= 0.018
-        entry.headMat.emissiveIntensity = Math.max(0, entry.flipDecay * 2.0)
+        entry.flipDecay -= 0.012
+        const baseline = entry.headMat.emissive.getHex() === 0 ? 0 : 1.3
+        entry.headMat.emissiveIntensity = Math.max(baseline, entry.flipDecay * 3.4)
+      }
+      // Halo pulse for informed agents
+      if (entry.haloMat.opacity > 0) {
+        const base = 0.22 + Math.sin(t * 2.4 + entry.walkPhase) * 0.06
+        entry.haloMat.opacity = base
+        const hs = 1 + Math.sin(t * 1.8 + entry.walkPhase) * 0.06
+        entry.halo.scale.set(hs, hs, hs)
       }
     }
 
-    // Flow arcs (data transfer arrows)
+    // Transfer beams — short fade
     for (let i = this.flows.length - 1; i >= 0; i--) {
       const f = this.flows[i]
       f.life -= dt
-      f.t += dt * 0.7
-      if (f.life <= 0 || f.t >= 1) {
-        this.flowGroup.remove(f.line)
-        this.flowGroup.remove(f.dot)
-        f.lineGeo.dispose()
-        f.lineMat.dispose()
-        f.dotGeo.dispose()
-        f.dotMat.dispose()
+      if (f.life <= 0) {
+        this.scene.remove(f.mesh)
+        f.mesh.geometry.dispose()
+        f.mat.dispose()
         this.flows.splice(i, 1)
         continue
       }
-      const p = f.curve.getPoint(Math.min(1, f.t))
-      f.dot.position.copy(p)
-      const fade = Math.max(0, f.life / 1.6)
-      f.lineMat.opacity = 0.2 + 0.55 * fade
-      f.dotMat.opacity = 0.4 + 0.6 * fade
+      const k = Math.max(0, f.life / 0.65)
+      f.mat.opacity = 0.85 * k * k
     }
 
-    // Ripples
+    // Ripples with optional delay + variable strength
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       const r = this.ripples[i]
-      r.life -= 0.022
+      if (r.delay > 0) { r.delay -= dt; continue }
+      r.life -= dt * 1.4
       if (r.life <= 0) {
         this.scene.remove(r.mesh)
         r.mesh.geometry.dispose()
@@ -786,9 +990,10 @@ export class CityScene {
         this.ripples.splice(i, 1)
         continue
       }
-      const s = 1 + (1 - r.life) * 7
+      const progress = 1 - r.life / 1.2
+      const s = 1 + progress * 8
       r.mesh.scale.set(s, s, s)
-      r.mesh.material.opacity = r.life * 0.9
+      r.mesh.material.opacity = r.life * 0.85 * r.strength
     }
 
     // Billboards: face camera for panels tagged userData.billboard
@@ -798,8 +1003,14 @@ export class CityScene {
       }
     })
 
+    // Re-enable auto-orbit after 8 seconds of idle
+    if (!this.controls.autoRotate && this._userInteractedAt && performance.now() - this._userInteractedAt > 8000) {
+      this.controls.autoRotate = true
+    }
+
     this.controls?.update()
-    this.renderer.render(this.scene, this.camera)
+    if (this.composer) this.composer.render()
+    else this.renderer.render(this.scene, this.camera)
   }
 
   _resize() {
@@ -810,6 +1021,8 @@ export class CityScene {
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(w, h, false)
+    if (this.composer) this.composer.setSize(w, h)
+    if (this.bloomPass) this.bloomPass.setSize(w, h)
   }
 
   dispose() {
@@ -822,6 +1035,10 @@ export class CityScene {
       this.canvas.removeEventListener('click', this._handlers.onClick)
     }
     if (this.controls) this.controls.dispose()
+    if (this.composer) {
+      this.composer.dispose?.()
+      this.composer = null
+    }
     if (this.renderer) {
       this.renderer.dispose()
       this.renderer.forceContextLoss?.()
@@ -881,9 +1098,10 @@ function addWindows(parent, mesh, rows, cols, side = 'front') {
   const winW = (w - (cols + 1) * gap) / cols
   const winH = (h - (rows + 1) * gap) / rows
   const mat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    emissive: 0xffe28a,
-    emissiveIntensity: 0.75,
+    color: 0x1a1f2b,
+    emissive: 0xffb55a,
+    emissiveIntensity: 1.1,
+    roughness: 0.4,
   })
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {

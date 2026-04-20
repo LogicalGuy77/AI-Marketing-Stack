@@ -12,12 +12,15 @@ in a module-level dict for the lifetime of the Flask process.
 
 from __future__ import annotations
 
+import json
+import os
 import random
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.llm_client import LLMClient
@@ -32,6 +35,8 @@ PROXIMITY_R = 6.0
 TOTAL_TICKS = 50
 POLL_SNAPSHOT_LIMIT = 1000
 
+OUTPUTS_DIR = Path(__file__).resolve().parents[3] / "outputs" / "spatial"
+
 
 ZONES: List[Dict[str, Any]] = [
     {"name": "Government", "bbox": (4, 22, 20, 36),  "color": "#3b82f6", "archetype": "official"},
@@ -45,27 +50,6 @@ ZONES_BY_NAME = {z["name"]: z for z in ZONES}
 
 
 SCENARIOS: Dict[str, Dict[str, Any]] = {
-    "sides_with_iran": {
-        "id": "sides_with_iran",
-        "title": "India Sides with Iran",
-        "seed": (
-            "India announces a strategic partnership with Iran, joins the SCO "
-            "energy corridor, and distances itself from the QUAD framework."
-        ),
-        "origin_zones": ["Government"],
-        "narratives": {
-            "official_realpolitik": (
-                "Pragmatic realignment: energy security and strategic autonomy "
-                "justify closer ties with Iran despite Western pushback."
-            ),
-        },
-        "journalist_count": 3,
-        "description": (
-            "News originates inside the Government District. Watch it cascade "
-            "outward through journalists to Market and University, while "
-            "Residential and Park zones remain uninformed late into the run."
-        ),
-    },
     "sides_with_us": {
         "id": "sides_with_us",
         "title": "India Sides with USA",
@@ -337,6 +321,30 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
     with _STATE_LOCK:
         SPATIAL_STATE[simulation_id]["status"] = "done"
         SPATIAL_STATE[simulation_id]["report"] = report
+        _persist(simulation_id)
+
+
+def _persist(simulation_id: str) -> None:
+    sim = SPATIAL_STATE.get(simulation_id)
+    if not sim:
+        return
+    try:
+        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "simulation_id": simulation_id,
+            "scenario_id": sim.get("scenario_id"),
+            "status": sim.get("status"),
+            "total_ticks": sim.get("total_ticks"),
+            "snapshots": sim.get("snapshots", []),
+            "report": sim.get("report"),
+            "finished_at": time.time(),
+        }
+        out = OUTPUTS_DIR / f"{simulation_id}.json"
+        with open(out, "w") as f:
+            json.dump(payload, f, indent=2)
+        logger.info("Persisted spatial sim %s to %s", simulation_id, out)
+    except Exception:
+        logger.exception("Failed to persist spatial sim %s", simulation_id)
 
 
 def _synthesize_report(agents: List[Agent], scenario: Dict[str, Any]) -> Dict[str, Any]:
