@@ -7,6 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js'
 
 // Zone theming: each zone has a palette and a builder that composes distinctive 3D structures.
+// ZONE_THEMES: keyed by zone NAME for backward compat with hardcoded scenarios.
 const ZONE_THEMES = {
   Government: {
     accent: 0x3b82f6,
@@ -50,6 +51,27 @@ const ZONE_THEMES = {
     ground: 0x253c1c,
     build: buildParkZone,
   },
+}
+
+// ZONE_BLUEPRINTS: keyed by zone ARCHETYPE for dynamic scenarios.
+// LLM picks an archetype; the renderer looks it up here.
+const ZONE_BLUEPRINTS = {
+  government:  { accent: 0x3b82f6, wall: 0x6b7799, roof: 0x3d4a6a, ground: 0x2c3450, build: buildGovernmentZone },
+  university:  { accent: 0xa855f7, wall: 0x6b5684, roof: 0x3e2f54, ground: 0x2d2340, build: buildUniversityZone },
+  market:      { accent: 0xf59e0b, wall: 0x7a6338, roof: 0x4d3a1a, ground: 0x3a2c1a, build: buildMarketZone },
+  industrial:  { accent: 0x94a3b8, wall: 0x525866, roof: 0x34394a, ground: 0x252a38, build: buildIndustrialZone },
+  residential: { accent: 0x10b981, wall: 0x4f6455, roof: 0x2c4034, ground: 0x243329, build: buildResidentialZone },
+  park:        { accent: 0x84cc16, wall: 0x425a2e, roof: 0x26361c, ground: 0x253c1c, build: buildParkZone },
+  airport:     { accent: 0x06b6d4, wall: 0x3a5060, roof: 0x1e3040, ground: 0x1a2535, build: buildAirportZone },
+  hospital:    { accent: 0xf0f9ff, wall: 0x6b8080, roof: 0x2c4040, ground: 0x202c30, build: buildHospitalZone },
+  military:    { accent: 0x4b5320, wall: 0x4a4d30, roof: 0x2f3020, ground: 0x252618, build: buildMilitaryZone },
+  media:       { accent: 0xf97316, wall: 0x5a4020, roof: 0x3a2810, ground: 0x2a1c0c, build: buildMediaZone },
+  port:        { accent: 0x0891b2, wall: 0x2a4a55, roof: 0x1a2e38, ground: 0x131f28, build: buildPortZone },
+  border:      { accent: 0xef4444, wall: 0x503030, roof: 0x301a1a, ground: 0x1f1010, build: buildBorderZone },
+  religious:   { accent: 0xfbbf24, wall: 0x5a4a30, roof: 0x3a2e18, ground: 0x28200c, build: buildReligiousZone },
+  slum:        { accent: 0x78716c, wall: 0x453e3a, roof: 0x2c2622, ground: 0x1e1a18, build: buildSlumZone },
+  tech_campus: { accent: 0x8b5cf6, wall: 0x3a3058, roof: 0x231c3a, ground: 0x1a1428, build: buildTechCampusZone },
+  generic:     { accent: 0x94a3b8, wall: 0x4a5066, roof: 0x2c3044, ground: 0x1e2230, build: buildGenericZone },
 }
 
 const AGENT_BODY_COLOR = {
@@ -451,7 +473,13 @@ export class CityScene {
 
   _setupZones() {
     for (const z of this.zones) {
-      const theme = ZONE_THEMES[z.name] || {}
+      // Dynamic: look up by archetype first; fallback to name-based theme for backward compat
+      const archetype = (z.archetype || '').toLowerCase().replace(/ /g, '_')
+      const theme = (archetype && ZONE_BLUEPRINTS[archetype])
+        ? { ...ZONE_BLUEPRINTS[archetype] }
+        : (ZONE_THEMES[z.name] || { ...ZONE_BLUEPRINTS.generic })
+      // Allow backend color override
+      if (z.color) theme.accent = parseInt(z.color.replace('#', ''), 16)
       const [x0, y0, x1, y1] = z.bbox
       const w = x1 - x0
       const h = y1 - y0
@@ -1745,6 +1773,416 @@ function buildParkZone(group, x0, y0, x1, y1, theme) {
       cx + Math.cos(ang) * 2.5, 0.55, cz + Math.sin(ang) * 2.5)
     b.rotation.y = -ang
   }
+}
+
+function buildAirportZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const tarmacMat = boxMat(0x374151, { roughness: 1 })
+  const glassMat = boxMat(theme.wall, { metalness: 0.4, roughness: 0.2 })
+
+  // Terminal building — long horizontal hall
+  addBox(group, x1 - x0 - 3, 2.8, 3.5, glassMat, cx, 0.35, cz)
+  // Glass roof strip
+  addBox(group, x1 - x0 - 3, 0.2, 3.6, boxMat(0x7dd3fc, { metalness: 0.5, roughness: 0.1 }), cx, 3.2, cz)
+  // Jet bridge arms
+  for (let i = -1; i <= 1; i++) {
+    addBox(group, 0.3, 0.4, 2.5, tarmacMat, cx + i * 3.5, 2.2, cz - 3)
+  }
+  // Control tower
+  const tower = addBox(group, 1.2, 7.0, 1.2, glassMat, x1 - 2.5, 0.35, y0 + 2.5)
+  addWindows(tower, tower, 3, 2, 'front')
+  // Tower cab (glass box on top)
+  addBox(group, 2.0, 1.0, 2.0, boxMat(0x7dd3fc, { metalness: 0.6, roughness: 0.1, emissive: 0x0ea5e9, emissiveIntensity: 0.3 }), x1 - 2.5, 7.9, y0 + 2.5)
+
+  // Runway — horizontal strip
+  addBox(group, x1 - x0 - 1, 0.05, 1.5, tarmacMat, cx, 0.38, y0 + 1.2)
+  // Runway — vertical strip
+  addBox(group, 1.5, 0.05, y1 - y0 - 5, tarmacMat, x0 + 2.5, 0.38, cz + 1)
+
+  // Runway centerline dashes
+  for (let i = 0; i < 5; i++) {
+    addBox(group, 1.2, 0.06, 0.2, boxMat(0xffffff, { roughness: 1 }), x0 + 3 + i * 2.2, 0.4, y0 + 1.2)
+  }
+  // Taxiway edge lights
+  for (let i = 0; i < 6; i++) {
+    const light = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 6, 6),
+      new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x22d3ee, emissiveIntensity: 2.5 })
+    )
+    light.position.set(x0 + 1 + i * 2, 0.5, y0 + 0.4)
+    group.add(light)
+  }
+}
+
+function buildHospitalZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(0xf1f5f9, { roughness: 0.6 })
+  const roofMat = boxMat(theme.roof)
+
+  // H-shaped building: left wing, right wing, central connector
+  const leftWing  = addBox(group, 3.5, 4.0, 6.0, wallMat, cx - 3.5, 0.35, cz)
+  const rightWing = addBox(group, 3.5, 4.0, 6.0, wallMat, cx + 3.5, 0.35, cz)
+  const connector = addBox(group, 3.5, 3.0, 2.5, wallMat, cx,        0.35, cz)
+  addWindows(leftWing,  leftWing,  3, 2, 'front')
+  addWindows(rightWing, rightWing, 3, 2, 'front')
+  addWindows(connector, connector, 2, 2, 'front')
+  // Flat roofs
+  addBox(group, 3.6, 0.2, 6.1, roofMat, cx - 3.5, 4.4, cz)
+  addBox(group, 3.6, 0.2, 6.1, roofMat, cx + 3.5, 4.4, cz)
+
+  // Red cross on front face (two overlapping boxes)
+  addBox(group, 0.25, 1.6, 0.08, boxMat(0xef4444, { emissive: 0xef4444, emissiveIntensity: 0.6 }), cx, 2.2, cz + 1.26)
+  addBox(group, 1.6, 0.25, 0.08, boxMat(0xef4444, { emissive: 0xef4444, emissiveIntensity: 0.6 }), cx, 2.2, cz + 1.26)
+
+  // Ambulance bay canopy
+  addBox(group, 4.0, 0.2, 2.5, boxMat(0x64748b, { metalness: 0.5 }), cx, 3.2, y0 + 1.5)
+  for (const sx of [cx - 1.5, cx + 1.5]) {
+    const col = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 3.2, 8), boxMat(0x94a3b8))
+    col.position.set(sx, 1.6, y0 + 1.5)
+    group.add(col)
+  }
+  // Helipad marker on roof
+  const pad = new THREE.Mesh(new THREE.CircleGeometry(1.0, 24), boxMat(0x22c55e, { roughness: 1 }))
+  pad.rotation.x = -Math.PI / 2
+  pad.position.set(cx + 3.5, 4.52, cz)
+  group.add(pad)
+}
+
+function buildMilitaryZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(theme.wall, { roughness: 0.9 })
+  const khakiMat = boxMat(0x4b5320, { roughness: 1 })
+
+  // Perimeter walls (4 sides, thin boxes)
+  const W = x1 - x0, H = y1 - y0
+  addBox(group, W, 1.2, 0.5, wallMat, cx, 0.35, y0 + 0.25)
+  addBox(group, W, 1.2, 0.5, wallMat, cx, 0.35, y1 - 0.25)
+  addBox(group, 0.5, 1.2, H, wallMat, x0 + 0.25, 0.35, cz)
+  addBox(group, 0.5, 1.2, H, wallMat, x1 - 0.25, 0.35, cz)
+
+  // Barracks — 3 identical rectangular blocks
+  for (let i = 0; i < 3; i++) {
+    const bx = cx - 3 + i * 3
+    const bar = addBox(group, 2.4, 1.8, 4.0, wallMat, bx, 0.35, cz - 1)
+    addWindows(bar, bar, 1, 3, 'front')
+    addBox(group, 2.5, 0.15, 4.1, khakiMat, bx, 2.3, cz - 1)
+  }
+
+  // Watchtowers at corners
+  for (const [wx, wz] of [[x0+1, y0+1],[x1-1, y0+1],[x0+1, y1-1],[x1-1, y1-1]]) {
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.65, 3.5, 10), wallMat)
+    base.position.set(wx, 1.75 + 0.35, wz)
+    base.castShadow = true
+    group.add(base)
+    addBox(group, 1.4, 0.9, 1.4, khakiMat, wx, 3.9, wz)
+  }
+
+  // Open parade ground (flat darker slab)
+  const parade = new THREE.Mesh(
+    new THREE.PlaneGeometry(6, 3),
+    new THREE.MeshStandardMaterial({ color: 0x3a3c28, roughness: 1 })
+  )
+  parade.rotation.x = -Math.PI / 2
+  parade.position.set(cx, 0.37, cz + 2.5)
+  group.add(parade)
+
+  // Flag pole
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 4.0, 8), boxMat(0x9ca3af, { metalness: 0.8 }))
+  pole.position.set(cx, 2.35, cz + 2.5)
+  group.add(pole)
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.6), new THREE.MeshStandardMaterial({ color: 0x16a34a, side: THREE.DoubleSide }))
+  flag.position.set(cx + 0.5, 4.1, cz + 2.5)
+  group.add(flag)
+}
+
+function buildMediaZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(theme.wall)
+  const orangeMat = boxMat(0xf97316, { emissive: 0xf97316, emissiveIntensity: 0.25 })
+
+  // Main production building
+  const studio = addBox(group, x1 - x0 - 4, 3.0, y1 - y0 - 3, wallMat, cx - 1, 0.35, cz)
+  addWindows(studio, studio, 2, 4, 'front')
+  addWindows(studio, studio, 2, 4, 'back')
+
+  // Broadcast tower — tapered cylinder
+  const towerBase = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.6, 7.0, 12), boxMat(0x374151, { metalness: 0.6 }))
+  towerBase.position.set(x1 - 1.5, 3.85 + 0.35, y0 + 1.5)
+  towerBase.castShadow = true
+  group.add(towerBase)
+  // Emissive tip
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.12, 2.0, 8),
+    new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0xef4444, emissiveIntensity: 3.0 }))
+  tip.position.set(x1 - 1.5, 8.35, y0 + 1.5)
+  group.add(tip)
+
+  // Satellite dish — flat disc + small offset disc
+  const dish = new THREE.Mesh(new THREE.CircleGeometry(1.0, 20), orangeMat)
+  dish.rotation.x = -Math.PI / 4
+  dish.position.set(x0 + 1.5, 2.5, y0 + 1.2)
+  group.add(dish)
+  const dishArm = addBox(group, 0.1, 1.5, 0.1, boxMat(0x6b7280), x0 + 1.5, 1.5, y0 + 1.2)
+
+  // Antenna cluster on roof
+  for (let i = 0; i < 3; i++) {
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.5, 6),
+      boxMat(0x9ca3af, { metalness: 0.7 }))
+    ant.position.set(cx - 2 + i * 1.8, 3.85, cz - (y1-y0)/2 + 0.5 + 0.35)
+    group.add(ant)
+  }
+}
+
+function buildPortZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(theme.wall, { roughness: 0.9 })
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x0369a1, emissive: 0x0369a1, emissiveIntensity: 0.15, roughness: 0.3, metalness: 0.5 })
+
+  // Dock edge — water strip along bottom of zone
+  const dock = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, 3.0), waterMat)
+  dock.rotation.x = -Math.PI / 2
+  dock.position.set(cx, 0.38, y1 - 1.5)
+  group.add(dock)
+  // Dock planks
+  for (let i = 0; i < 5; i++) {
+    addBox(group, x1 - x0 - 0.5, 0.12, 0.2, boxMat(0x78350f, { roughness: 1 }), cx, 0.45, y1 - 0.4 - i * 0.5)
+  }
+
+  // Warehouse
+  const warehouse = addBox(group, 6.0, 3.5, 4.0, wallMat, cx - 1, 0.35, cz - 1)
+  addWindows(warehouse, warehouse, 2, 3, 'front')
+  addBox(group, 6.1, 0.2, 4.1, boxMat(theme.roof), cx - 1, 4.05, cz - 1)
+
+  // Crane — vertical mast + horizontal arm
+  addBox(group, 0.5, 6.0, 0.5, boxMat(0xf59e0b), x1 - 2, 0.35, y1 - 2.5)
+  addBox(group, 4.0, 0.35, 0.35, boxMat(0xf59e0b), x1 - 4, 6.5, y1 - 2.5)
+  // Cable (thin vertical)
+  addBox(group, 0.08, 3.5, 0.08, boxMat(0x9ca3af, { metalness: 0.8 }), x1 - 4.5, 3.5, y1 - 2.5)
+
+  // Shipping containers
+  const contColors = [0xef4444, 0x2563eb, 0x16a34a, 0xf59e0b]
+  for (let i = 0; i < 4; i++) {
+    addBox(group, 2.0, 1.0, 0.9, boxMat(contColors[i], { roughness: 0.9 }), x0 + 1.5 + i * 2.2, 0.35, y0 + 1.5)
+  }
+  // Second row, stacked
+  for (let i = 0; i < 3; i++) {
+    addBox(group, 2.0, 1.0, 0.9, boxMat(contColors[(i + 2) % 4], { roughness: 0.9 }), x0 + 2.6 + i * 2.2, 1.4, y0 + 1.5)
+  }
+}
+
+function buildBorderZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(theme.wall, { roughness: 0.9 })
+  const redMat  = boxMat(0xef4444)
+  const whiteMat = boxMat(0xf8fafc)
+
+  // Checkpoint barrier — spanning width with red/white stripes
+  for (let i = 0; i < Math.floor((x1 - x0) / 1.4); i++) {
+    addBox(group, 1.3, 0.3, 0.25, i % 2 === 0 ? redMat : whiteMat, x0 + 0.7 + i * 1.4, 1.4, cz)
+  }
+  // Barrier poles
+  for (const px of [cx - 3, cx + 3]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 1.5, 8), boxMat(0x374151))
+    pole.position.set(px, 1.1, cz)
+    group.add(pole)
+  }
+
+  // Guard booths
+  for (const [bx, bz] of [[cx - 4, cz - 1], [cx + 4, cz - 1]]) {
+    addBox(group, 1.4, 2.4, 1.4, wallMat, bx, 0.35, bz)
+    addBox(group, 1.5, 0.2, 1.5, boxMat(theme.roof), bx, 2.6, bz)
+    // Window
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.6),
+      new THREE.MeshStandardMaterial({ color: 0x7dd3fc, emissive: 0x7dd3fc, emissiveIntensity: 0.4 }))
+    win.position.set(bx, 1.6, bz + 0.71)
+    group.add(win)
+  }
+
+  // Watchtowers at zone corners
+  for (const [wx, wz] of [[x0 + 1, y0 + 1], [x1 - 1, y0 + 1]]) {
+    const t = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.6, 4.0, 10), wallMat)
+    t.position.set(wx, 2.35, wz)
+    t.castShadow = true
+    group.add(t)
+    addBox(group, 1.4, 0.9, 1.4, boxMat(0x374151), wx, 4.9, wz)
+    // Searchlight
+    const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.1, 0.4, 8),
+      new THREE.MeshStandardMaterial({ color: 0xfde047, emissive: 0xfde047, emissiveIntensity: 1.5 }))
+    sl.rotation.z = Math.PI / 4
+    sl.position.set(wx, 5.6, wz)
+    group.add(sl)
+  }
+
+  // Fence line
+  for (let i = 0; i < Math.floor((x1 - x0) / 1.5); i++) {
+    const fp = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.8, 6), boxMat(0x6b7280, { metalness: 0.6 }))
+    fp.position.set(x0 + 0.75 + i * 1.5, 1.3, y0 + 0.3)
+    group.add(fp)
+  }
+  addBox(group, x1 - x0, 0.06, 0.06, boxMat(0x9ca3af, { metalness: 0.7 }), cx, 2.1, y0 + 0.3)
+}
+
+function buildReligiousZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(theme.wall, { roughness: 0.6 })
+  const goldMat = boxMat(0xfbbf24, { metalness: 0.6, roughness: 0.3 })
+
+  // Main prayer hall
+  const hall = addBox(group, 5.5, 2.8, 4.5, wallMat, cx, 0.35, cz)
+  addWindows(hall, hall, 2, 3, 'front')
+  addWindows(hall, hall, 2, 3, 'back')
+
+  // Central dome
+  const drum = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.6, 0.8, 20), wallMat)
+  drum.position.set(cx, 3.55, cz)
+  drum.castShadow = true
+  group.add(drum)
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(1.4, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+    goldMat
+  )
+  dome.position.set(cx, 3.95, cz)
+  dome.castShadow = true
+  group.add(dome)
+  // Finial
+  const finial = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.12, 0.8, 8), goldMat)
+  finial.position.set(cx, 5.45, cz)
+  group.add(finial)
+
+  // Minaret — tall cylindrical tower
+  const minaret = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 6.5, 16), wallMat)
+  minaret.position.set(x0 + 1.2, 3.6, y0 + 1.2)
+  minaret.castShadow = true
+  group.add(minaret)
+  const minaretTop = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.8, 16), goldMat)
+  minaretTop.position.set(x0 + 1.2, 7.25, y0 + 1.2)
+  group.add(minaretTop)
+
+  // Courtyard plane
+  const yard = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 3.0),
+    new THREE.MeshStandardMaterial({ color: 0xd6c9a0, roughness: 1 }))
+  yard.rotation.x = -Math.PI / 2
+  yard.position.set(cx, 0.38, y1 - 2.0)
+  group.add(yard)
+
+  // Arch gate
+  const gateL = addBox(group, 0.4, 2.2, 0.4, wallMat, cx - 1.2, 0.35, y1 - 0.8)
+  const gateR = addBox(group, 0.4, 2.2, 0.4, wallMat, cx + 1.2, 0.35, y1 - 0.8)
+  addBox(group, 2.4, 0.35, 0.5, wallMat, cx, 2.45, y1 - 0.8)
+}
+
+function buildSlumZone(group, x0, y0, x1, y1, theme) {
+  const rng = (min, max) => min + Math.random() * (max - min)
+  const roughMat = (c) => boxMat(c, { roughness: 1.0, metalness: 0 })
+  const colors = [0x78716c, 0x6b7280, 0x57534e, 0x737373, 0x854d0e, 0x713f12]
+
+  // Dense irregular small structures
+  const count = 18
+  for (let i = 0; i < count; i++) {
+    const sw = rng(1.2, 2.8)
+    const sh = rng(0.8, 2.2)
+    const sd = rng(1.0, 2.4)
+    const sx = rng(x0 + 0.8, x1 - 0.8)
+    const sz = rng(y0 + 0.8, y1 - 0.8)
+    addBox(group, sw, sh, sd, roughMat(colors[i % colors.length]), sx, 0.35, sz)
+    // Corrugated roof — slightly wider flat slab
+    addBox(group, sw + 0.3, 0.12, sd + 0.3, roughMat(0x6b7280), sx, 0.35 + sh + 0.06, sz)
+  }
+
+  // Narrow winding path
+  const pathMat = boxMat(0x44403c, { roughness: 1 })
+  for (let i = 0; i < 8; i++) {
+    const px = cx_slum(x0, x1, i)
+    const pz = y0 + 1 + i * ((y1 - y0 - 2) / 7)
+    addBox(group, 1.2, 0.05, 0.8, pathMat, px, 0.4, pz)
+  }
+
+  // Overhead wire lines (thin boxes)
+  addBox(group, x1 - x0 - 1, 0.04, 0.04, boxMat(0x292524, { metalness: 0.5 }), (x0 + x1) / 2, 3.5, (y0 + y1) / 2)
+  addBox(group, 0.04, 0.04, y1 - y0 - 1, boxMat(0x292524, { metalness: 0.5 }), (x0 + x1) / 2 + 1, 3.0, (y0 + y1) / 2)
+
+  function cx_slum(x0, x1, i) {
+    return (x0 + x1) / 2 + Math.sin(i * 0.9) * ((x1 - x0) * 0.18)
+  }
+}
+
+function buildTechCampusZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const glassMat = boxMat(theme.wall, { metalness: 0.5, roughness: 0.15 })
+  const concreteMat = boxMat(0x475569, { roughness: 0.7 })
+
+  // Three modern glass office blocks
+  const blocks = [
+    { x: cx - 3.5, z: cz, w: 3.5, h: 5.0, d: 3.0 },
+    { x: cx + 3.0, z: cz - 1, w: 3.0, h: 7.0, d: 2.5 },
+    { x: cx,       z: cz + 3, w: 4.5, h: 3.5, d: 2.2 },
+  ]
+  for (const b of blocks) {
+    const block = addBox(group, b.w, b.h, b.d, glassMat, b.x, 0.35, b.z)
+    addWindows(block, block, Math.floor(b.h / 1.4), 3, 'front')
+    addWindows(block, block, Math.floor(b.h / 1.4), 3, 'back')
+    // Reflective roof trim
+    addBox(group, b.w + 0.2, 0.15, b.d + 0.2, boxMat(0x94a3b8, { metalness: 0.8, roughness: 0.1 }), b.x, 0.35 + b.h + 0.075, b.z)
+  }
+
+  // Open courtyard — paved slab
+  const court = new THREE.Mesh(new THREE.PlaneGeometry(4.0, 3.5),
+    new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8, metalness: 0.1 }))
+  court.rotation.x = -Math.PI / 2
+  court.position.set(cx, 0.38, cz - 2)
+  group.add(court)
+
+  // Campus path arc (approximated with short segments)
+  const pathMat = boxMat(0x64748b, { roughness: 0.9 })
+  for (let t = 0; t < 10; t++) {
+    const a = (t / 10) * Math.PI
+    const r = 3.0
+    const px = cx + Math.cos(a + Math.PI) * r
+    const pz = cz - 2 + Math.sin(a) * 1.5
+    addBox(group, 0.5, 0.05, 0.5, pathMat, px, 0.4, pz)
+  }
+
+  // Trees cluster
+  for (let i = 0; i < 5; i++) {
+    const t = buildTree(0.5 + Math.random() * 0.3, 1.1 + Math.random() * 0.5, [0x166534, 0x15803d, 0x4ade80][i % 3])
+    t.position.set(x0 + 0.8 + Math.random() * 2.5, 0.38, y0 + 0.8 + Math.random() * (y1 - y0 - 2))
+    group.add(t)
+  }
+
+  // Glowing logo slab on main building
+  const logo = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.5),
+    new THREE.MeshStandardMaterial({ color: 0x8b5cf6, emissive: 0x8b5cf6, emissiveIntensity: 1.2, side: THREE.DoubleSide }))
+  logo.position.set(cx - 3.5, 4.0, cz + 1.52)
+  group.add(logo)
+}
+
+function buildGenericZone(group, x0, y0, x1, y1, theme) {
+  const cx = (x0 + x1) / 2
+  const cz = (y0 + y1) / 2
+  const wallMat = boxMat(theme.wall)
+  const roofMat = boxMat(theme.roof)
+
+  // Central building
+  const main = addBox(group, 4.5, 3.0, 3.5, wallMat, cx, 0.35, cz)
+  addWindows(main, main, 2, 3, 'front')
+  addBox(group, 4.6, 0.2, 3.6, roofMat, cx, 3.5, cz)
+
+  // Two smaller flanking buildings
+  addBox(group, 2.2, 2.0, 2.2, wallMat, cx - 3.5, 0.35, cz - 1)
+  addBox(group, 2.2, 2.0, 2.2, wallMat, cx + 3.5, 0.35, cz + 1)
+
+  // Ground-level detail
+  addBox(group, 1.0, 0.4, 1.0, boxMat(0x374151), cx - 1.5, 0.35, cz + 2.5)
+  const t = buildTree(0.6, 1.2, 0x166534)
+  t.position.set(cx + 1.5, 0.35, cz + 2.5)
+  group.add(t)
 }
 
 function buildTree(radius, height, leafColor) {

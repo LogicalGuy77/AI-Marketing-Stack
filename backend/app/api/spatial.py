@@ -8,6 +8,7 @@ per-tick snapshots and fetches /report once status == 'done'.
 from flask import jsonify, request
 
 from ..services import spatial_runner
+from ..services.spatial_scenario_generator import SpatialScenarioGenerator
 from . import spatial_bp
 
 
@@ -21,17 +22,34 @@ def scenarios():
     })
 
 
+@spatial_bp.route("/generate", methods=["POST"])
+def generate():
+    body = request.get_json(silent=True) or {}
+    graph_id = body.get("graph_id")
+    requirement = body.get("requirement", "")
+    if not graph_id:
+        return jsonify({"error": "graph_id required"}), 400
+    try:
+        gen = SpatialScenarioGenerator()
+        scenario = gen.generate(graph_id=graph_id, requirement=requirement)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"scenario": scenario})
+
+
 @spatial_bp.route("/start", methods=["POST"])
 def start():
     body = request.get_json(silent=True) or {}
     scenario_id = body.get("scenario")
-    if not scenario_id:
-        return jsonify({"error": "scenario required"}), 400
+    scenario_dict = body.get("scenario_dict")
     try:
-        simulation_id = spatial_runner.start_simulation(scenario_id)
+        simulation_id = spatial_runner.start_simulation(
+            scenario_id=scenario_id, scenario_dict=scenario_dict
+        )
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    return jsonify({"simulation_id": simulation_id, "scenario": scenario_id})
+    effective_id = scenario_id or (scenario_dict.get("id") if scenario_dict else None)
+    return jsonify({"simulation_id": simulation_id, "scenario": effective_id})
 
 
 @spatial_bp.route("/<sim_id>/state", methods=["GET"])

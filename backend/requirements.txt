@@ -27,6 +27,18 @@ PyMuPDF>=1.24.0
 charset-normalizer>=3.0.0
 chardet>=5.0.0
 
+# ============= 空间模拟 (Spatial Simulation) =============
+# Mesa agent-based modelling framework (requires Python >=3.12)
+# Provides ContinuousSpace for fast spatial neighbour queries
+mesa>=2.0.0
+
+# Concordia LLM Game Master framework
+# Provides narrative event generation for spatial simulation ticks
+gdm-concordia>=1.0.0
+
+# Anthropic SDK (required for Concordia ClaudeLM adapter)
+anthropic>=0.25.0
+
 # ============= 工具库 =============
 # 环境变量加载
 python-dotenv>=1.0.0

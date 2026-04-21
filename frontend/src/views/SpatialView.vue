@@ -1,14 +1,61 @@
 <template>
   <div class="cinema-root">
     <!-- PHASE 1: picker -->
-    <ScenarioPicker
-      v-if="phase === 'pick'"
-      :scenarios="scenarios"
-      :completed-ids="[]"
-      :previous-runs="previousRuns"
-      @pick="startScenario"
-      @replay="replayRun"
-    />
+    <template v-if="phase === 'pick'">
+      <ScenarioPicker
+        :scenarios="scenarios"
+        :completed-ids="[]"
+        :previous-runs="previousRuns"
+        @pick="startScenario"
+        @replay="replayRun"
+      />
+      <!-- Generate from graph button overlaid at bottom of picker -->
+      <div class="gen-bar">
+        <div class="gen-bar-label">Generate a dynamic world from a knowledge graph:</div>
+        <input
+          v-model="generateGraphId"
+          class="gen-bar-input"
+          placeholder="Enter graph ID…"
+          @keydown.enter="generateGraphId && generateFromGraph(generateGraphId)"
+        />
+        <button
+          class="gen-bar-btn"
+          :disabled="!generateGraphId"
+          @click="generateFromGraph(generateGraphId)"
+        >Generate World ⚡</button>
+        <div v-if="generationError" class="gen-bar-error">{{ generationError }}</div>
+      </div>
+    </template>
+
+    <!-- PHASE 1.5: generating (spinner) -->
+    <div v-else-if="phase === 'generating'" class="gen-loading">
+      <div class="gen-spinner"></div>
+      <div class="gen-label">Generating world from graph…</div>
+      <div class="gen-sub">Reading entities and crafting scenario with AI</div>
+    </div>
+
+    <!-- PHASE 1.75: preview (generated scenario card) -->
+    <div v-else-if="phase === 'preview' && generatedScenario" class="gen-preview">
+      <div class="gp-card">
+        <div class="gp-tag">AI GENERATED</div>
+        <div class="gp-title">{{ generatedScenario.title }}</div>
+        <div class="gp-seed">{{ generatedScenario.seed }}</div>
+        <div class="gp-zones">
+          <span v-for="z in generatedScenario.zones" :key="z.name" class="gp-zone-chip" :style="{ background: z.color || '#3b82f6' }">
+            {{ z.name }}
+          </span>
+        </div>
+        <div class="gp-narratives">
+          <span v-for="(text, slug) in generatedScenario.narratives" :key="slug" class="gp-narr-pill">
+            {{ slug.replace(/_/g, ' ') }}
+          </span>
+        </div>
+        <div class="gp-actions">
+          <button class="gp-btn primary" @click="startGeneratedScenario(generatedScenario)">Play this world</button>
+          <button class="gp-btn ghost" @click="phase = 'pick'">Back</button>
+        </div>
+      </div>
+    </div>
 
     <!-- PHASE 2: cinematic player -->
     <div v-else-if="phase === 'play'" class="stage">
@@ -322,13 +369,14 @@ import AgentInfoPanel from '../components/spatial/AgentInfoPanel.vue'
 import {
   getSpatialScenarios,
   startSpatialSim,
+  generateSpatialScenario,
   getSpatialState,
   getSpatialReport,
   listSpatialRuns,
   loadSpatialRun,
 } from '../api/spatial.js'
 
-const phase = ref('pick') // pick | play
+const phase = ref('pick') // pick | generating | preview | play
 const scenarios = ref([])
 const previousRuns = ref([])
 const zones = ref([])
@@ -338,6 +386,10 @@ const totalTicks = ref(50)
 const currentScenario = ref(null)
 const currentSimId = ref(null)
 const simStatus = ref('loading') // loading | done
+
+const generatedScenario = ref(null)
+const generationError = ref(null)
+const generateGraphId = ref('')
 
 const snapshotsByTick = ref(new Map())
 const loadedMaxTick = ref(-1)
@@ -371,15 +423,11 @@ let tickAccumulator = 0
 
 const selectedAgent = ref(null)
 
-const ZONE_COLORS = {
-  Government: '#3b82f6',
-  University: '#a855f7',
-  Market: '#f59e0b',
-  Industrial: '#64748b',
-  Residential: '#10b981',
-  Park: '#84cc16',
+// Derived from zones.value so dynamic scenarios get correct colors automatically
+const zoneColor = (z) => {
+  const found = zones.value.find((zn) => zn.name === z)
+  return found?.color || '#94a3b8'
 }
-const zoneColor = (z) => ZONE_COLORS[z] || '#94a3b8'
 
 const statusClass = computed(() =>
   simStatus.value === 'done' ? 'status-done' : (phase.value === 'play' ? 'status-live' : 'status-idle')
@@ -405,8 +453,10 @@ function shortNarrative(n) {
   return String(n).replace(/_/g, ' ').toUpperCase()
 }
 const zoneStats = computed(() => {
-  const zones = ['Government', 'University', 'Market', 'Industrial', 'Residential', 'Park']
-  const out = zones.map((name) => ({
+  const zoneNames = zones.value.length
+    ? zones.value.map((z) => z.name)
+    : ['Government', 'University', 'Market', 'Industrial', 'Residential', 'Park']
+  const out = zoneNames.map((name) => ({
     name,
     total: 0,
     informed: 0,
@@ -443,8 +493,18 @@ const zoneStats = computed(() => {
 })
 const loadedPct = computed(() => totalTicks.value ? Math.max(0, (loadedMaxTick.value / totalTicks.value) * 100) : 0)
 const playedPct = computed(() => totalTicks.value ? (currentTick.value / totalTicks.value) * 100 : 0)
-const beliefLabels = computed(() => currentScenario.value?.narratives ?? [])
-const narrativeMap = computed(() => currentScenario.value?.narrative_map ?? {})
+const beliefLabels = computed(() => {
+  const n = currentScenario.value?.narratives
+  if (!n) return []
+  if (Array.isArray(n)) return n
+  return Object.keys(n)  // dynamic scenario: narratives is a slug→text object
+})
+const narrativeMap = computed(() => {
+  const n = currentScenario.value?.narratives
+  if (!n) return currentScenario.value?.narrative_map ?? {}
+  if (Array.isArray(n)) return currentScenario.value?.narrative_map ?? {}
+  return n  // dynamic scenario: narratives is already slug→text
+})
 const visibleThoughts = computed(() => thoughts.value.filter((t) => t.tick <= currentTick.value))
 const reversedThoughts = computed(() => visibleThoughts.value.slice().reverse())
 
@@ -491,11 +551,12 @@ const storyBeats = computed(() => {
   }
 
   for (const snap of snaps) {
-    // Phase 4: scripted events from snapshot
+    // Phase 4: scripted events + Concordia GM events from snapshot
     for (const ev of snap.events || []) {
+      const kind = ev.kind === 'gm_event' ? 'gm_event' : 'event'
       out.push({
         tick: snap.tick,
-        kind: 'event',
+        kind,
         zone: ev.zone,
         text: ev.text || `${ev.kind} in ${ev.zone || 'city'}`,
       })
@@ -652,6 +713,61 @@ const tickMarkers = computed(() => {
   return out
 })
 
+async function generateFromGraph(graphId) {
+  generationError.value = null
+  generatedScenario.value = null
+  phase.value = 'generating'
+  try {
+    const resp = await generateSpatialScenario(graphId)
+    generatedScenario.value = resp.scenario
+    phase.value = 'preview'
+  } catch (e) {
+    generationError.value = e?.response?.data?.error || e?.message || 'Generation failed.'
+    phase.value = 'pick'
+  }
+}
+
+async function startGeneratedScenario(scenario) {
+  const sc = scenario || generatedScenario.value
+  if (!sc) return
+  zones.value = sc.zones || []
+  grid.value = { w: 60, h: 40 }
+  totalTicks.value = sc.total_ticks || 50
+  currentScenario.value = {
+    id: sc.id,
+    title: sc.title,
+    seed: sc.seed,
+    description: sc.description,
+    narratives: Object.keys(sc.narratives || {}),
+    narrative_map: sc.narratives || {},
+  }
+  snapshotsByTick.value = new Map()
+  thoughts.value = []
+  agentIndex.value = new Map()
+  currentTick.value = 0
+  loadedMaxTick.value = -1
+  report.value = null
+  simStatus.value = 'loading'
+  isPlaying.value = true
+  playSpeed.value = 1
+  drawerOpen.value = true
+  phase.value = 'play'
+
+  const resp = await startSpatialSim(null, sc)
+  currentSimId.value = resp.simulation_id
+
+  await nextTick()
+  await waitForCanvasSize(canvasRef)
+  if (scene) scene.dispose()
+  selectedAgent.value = null
+  scene = new CityScene()
+  scene.init(canvasRef.value, grid.value, zones.value)
+  scene.onAgentSelect = (a) => { selectedAgent.value = a }
+
+  startPlaybackLoop()
+  pollLoop()
+}
+
 async function loadScenarios() {
   const r = await getSpatialScenarios()
   scenarios.value = r.scenarios
@@ -713,6 +829,10 @@ async function pollLoop() {
   try {
     const data = await getSpatialState(currentSimId.value, loadedMaxTick.value)
     const firstLoad = loadedMaxTick.value < 0
+    // Pick up zones from state response (populated for dynamic scenarios)
+    if (data.zones && data.zones.length && !zones.value.length) {
+      zones.value = data.zones
+    }
     for (const snap of data.snapshots) {
       if (snapshotsByTick.value.has(snap.tick)) continue
       snapshotsByTick.value.set(snap.tick, snap)
@@ -847,9 +967,13 @@ async function replayRun(simId) {
   }
 
   currentSimId.value = payload.simulation_id
-  // Pick matching scenario from already-loaded list (gives us narratives + narrative_map)
+  // Use embedded scenario if present (dynamic runs), else find in loaded list
   const scenarioId = payload.scenario_id
-  currentScenario.value = scenarios.value.find((s) => s.id === scenarioId) || {
+  const embeddedScenario = payload.scenario
+  if (embeddedScenario?.zones?.length) {
+    zones.value = embeddedScenario.zones
+  }
+  currentScenario.value = scenarios.value.find((s) => s.id === scenarioId) || embeddedScenario || {
     id: scenarioId,
     title: payload.report?.scenario_title || scenarioId,
     narratives: [],
@@ -910,6 +1034,158 @@ onBeforeUnmount(() => {
 /* ============================================================
    Cinematic dark theme
    ============================================================ */
+/* Generate bar (overlaid on picker, bottom of screen) */
+.gen-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 14px 28px;
+  background: rgba(5, 7, 13, 0.9);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 20;
+  flex-wrap: wrap;
+}
+.gen-bar-label { font-size: 12px; color: #8490a8; white-space: nowrap; }
+.gen-bar-input {
+  flex: 1;
+  min-width: 180px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #e6edf9;
+  font-size: 13px;
+  outline: none;
+  font-family: 'JetBrains Mono', monospace;
+}
+.gen-bar-input:focus { border-color: #ffa13a; }
+.gen-bar-btn {
+  background: #ffa13a;
+  color: #05070d;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.gen-bar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.gen-bar-btn:not(:disabled):hover { background: #ffb35a; }
+.gen-bar-error { font-size: 12px; color: #fca5a5; width: 100%; }
+
+/* GM events get a distinct amber color in beats */
+.beat.k-gm_event { border-color: rgba(251, 191, 36, 0.4); }
+.beat.k-gm_event .beat-kind { color: #fbbf24; }
+.caption .k-gm_event { color: #fbbf24; }
+
+/* Generating / preview phases */
+.gen-loading {
+  position: fixed;
+  inset: 0;
+  background: #05070d;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  color: #e6edf9;
+}
+.gen-spinner {
+  width: 48px;
+  height: 48px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #ffa13a;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.gen-label { font-size: 18px; font-weight: 600; }
+.gen-sub { font-size: 13px; color: #8490a8; }
+.gen-error {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  z-index: 10;
+}
+
+.gen-preview {
+  position: fixed;
+  inset: 0;
+  background: #05070d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.gp-card {
+  background: rgba(16, 22, 38, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 36px 40px;
+  max-width: 560px;
+  width: 90%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.gp-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #ffa13a;
+  font-family: 'JetBrains Mono', monospace;
+}
+.gp-title { font-size: 22px; font-weight: 700; color: #e6edf9; }
+.gp-seed { font-size: 13px; color: #8490a8; line-height: 1.6; }
+.gp-zones { display: flex; flex-wrap: wrap; gap: 6px; }
+.gp-zone-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  color: #fff;
+  opacity: 0.9;
+}
+.gp-narratives { display: flex; flex-wrap: wrap; gap: 6px; }
+.gp-narr-pill {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #c8d2e4;
+  font-family: 'JetBrains Mono', monospace;
+}
+.gp-actions { display: flex; gap: 12px; margin-top: 8px; }
+.gp-btn {
+  padding: 10px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+}
+.gp-btn.primary { background: #ffa13a; color: #05070d; }
+.gp-btn.primary:hover { background: #ffb35a; }
+.gp-btn.ghost {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #8490a8;
+}
+.gp-btn.ghost:hover { border-color: rgba(255, 255, 255, 0.3); color: #c8d2e4; }
+
 .cinema-root {
   position: fixed;
   inset: 0;

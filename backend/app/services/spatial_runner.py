@@ -27,6 +27,125 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..utils.llm_client import LLMClient
 from ..utils.logger import get_logger
 
+# ---------------------------------------------------------------------------
+# Optional Mesa integration for fast spatial neighbour queries.
+# Falls back gracefully if mesa is not installed.
+# ---------------------------------------------------------------------------
+try:
+    import mesa
+    from mesa.space import ContinuousSpace as _MesaContinuousSpace
+
+    class _SpatialProxyAgent(mesa.Agent):
+        """Thin Mesa wrapper that holds a reference to our Agent dataclass."""
+        def __init__(self, model, agent_data):
+            super().__init__(model)
+            self.data = agent_data
+        def step(self):
+            pass
+
+    class _SpatialMesaModel(mesa.Model):
+        def __init__(self, agents_data, grid_w: float = 60.0, grid_h: float = 40.0):
+            super().__init__()
+            self.space = _MesaContinuousSpace(
+                x_max=float(grid_w), y_max=float(grid_h),
+                torus=False, x_min=0.0, y_min=0.0
+            )
+            self.proxy_map: Dict[str, _SpatialProxyAgent] = {}
+            for a in agents_data:
+                proxy = _SpatialProxyAgent(self, a)
+                self.space.place_agent(proxy, (float(a.x), float(a.y)))
+                self.proxy_map[a.id] = proxy
+
+        def sync_positions(self, agents_data) -> None:
+            for a in agents_data:
+                proxy = self.proxy_map.get(a.id)
+                if proxy:
+                    self.space.move_agent(proxy, (float(a.x), float(a.y)))
+
+        def get_neighbors_for(self, agent_id: str, radius: float) -> list:
+            proxy = self.proxy_map.get(agent_id)
+            if not proxy:
+                return []
+            neighbours = self.space.get_neighbors(proxy.pos, radius, include_center=False)
+            return [n.data for n in neighbours]
+
+        def step(self):
+            pass
+
+    _MESA_AVAILABLE = True
+except ImportError:
+    _MESA_AVAILABLE = False
+    _SpatialMesaModel = None
+
+# ---------------------------------------------------------------------------
+# Optional Concordia Game Master integration.
+# Falls back gracefully if gdm-concordia is not installed.
+# ---------------------------------------------------------------------------
+try:
+    import anthropic as _anthropic
+    from concordia.language_model import language_model as _lm_lib
+    from concordia.prefabs.simulation import generic as _concordia_sim
+    from concordia.typing import prefab as _prefab_lib
+    from concordia.utils import helper_functions as _concordia_helpers
+    from concordia.prefabs import entity as _entity_prefabs
+    from concordia.prefabs import game_master as _gm_prefabs
+    import numpy as _np
+
+    class _ClaudeLM(_lm_lib.LanguageModel):
+        """Adapts Anthropic Claude to Concordia's LanguageModel ABC."""
+        def __init__(self, model_name: str = "claude-sonnet-4-6"):
+            self._client = _anthropic.Anthropic()
+            self._model = model_name
+
+        def sample_text(self, prompt: str, *, max_tokens: int = 2000,
+                        terminators=(), temperature: float = 0.7,
+                        top_p: float = 0.95, top_k: int = 64,
+                        timeout: float = 60.0, seed=None) -> str:
+            msg = self._client.messages.create(
+                model=self._model, max_tokens=max_tokens, temperature=temperature,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return msg.content[0].text
+
+        def sample_choice(self, prompt: str, responses: list, *, seed=None) -> tuple:
+            augmented = prompt + "\nRespond EXACTLY with one of:\n" + "\n".join(responses)
+            for _ in range(20):
+                answer = self.sample_text(augmented, max_tokens=50).strip()
+                if answer in responses:
+                    return responses.index(answer), answer, {}
+            raise _lm_lib.InvalidResponseError("No valid choice returned by Claude")
+
+    def _build_concordia_gm(scenario: Dict[str, Any], lm: _ClaudeLM):
+        premise = (
+            f"Scenario: {scenario['title']}\n"
+            f"Seed event: {scenario['seed']}\n"
+            f"Competing narratives: {', '.join(scenario.get('narratives', {}).keys())}"
+        )
+        gm_config = _prefab_lib.InstanceConfig(
+            prefab="generic__GameMaster",
+            role=_prefab_lib.Role.GAME_MASTER,
+            params={"name": "narrator", "acting_order": "fixed"},
+        )
+        config = _prefab_lib.Config(
+            default_premise=premise,
+            default_max_steps=1,
+            prefabs={
+                **_concordia_helpers.get_package_classes(_entity_prefabs),
+                **_concordia_helpers.get_package_classes(_gm_prefabs),
+            },
+            instances=[gm_config],
+        )
+        embedder = lambda text: _np.zeros(768)
+        return _concordia_sim.Simulation(config=config, model=lm, embedder=embedder)
+
+    _CONCORDIA_AVAILABLE = True
+except ImportError:
+    _CONCORDIA_AVAILABLE = False
+    _ClaudeLM = None
+    _build_concordia_gm = None
+
+GM_TICK_INTERVAL = 5  # call Concordia GM every N ticks
+
 logger = get_logger("mirofish.spatial")
 
 
@@ -175,43 +294,71 @@ SPATIAL_STATE: Dict[str, Dict[str, Any]] = {}
 _STATE_LOCK = threading.Lock()
 
 
-def _rand_in_zone(zone_name: str) -> Tuple[float, float]:
-    x0, y0, x1, y1 = ZONES_BY_NAME[zone_name]["bbox"]
+def _rand_in_zone(zone_name: str, zones_by_name: Optional[Dict] = None) -> Tuple[float, float]:
+    zbm = zones_by_name if zones_by_name is not None else ZONES_BY_NAME
+    x0, y0, x1, y1 = zbm[zone_name]["bbox"]
     return random.uniform(x0 + 0.5, x1 - 0.5), random.uniform(y0 + 0.5, y1 - 0.5)
 
 
-def _zone_center(zone_name: str) -> Tuple[float, float]:
-    x0, y0, x1, y1 = ZONES_BY_NAME[zone_name]["bbox"]
+def _zone_center(zone_name: str, zones_by_name: Optional[Dict] = None) -> Tuple[float, float]:
+    zbm = zones_by_name if zones_by_name is not None else ZONES_BY_NAME
+    x0, y0, x1, y1 = zbm[zone_name]["bbox"]
     return (x0 + x1) / 2.0, (y0 + y1) / 2.0
 
 
-def spawn_agents(scenario: Dict[str, Any]) -> List[Agent]:
-    """Create the initial 24-agent population for a scenario."""
-    plan = [
-        ("Government",  4, "official",  ["PMO Aide", "MEA Officer", "NSA Analyst", "Cabinet Secretary"]),
-        ("University",  4, "student",   ["PhD Scholar", "JNU Student", "Debate Captain", "Journalism Major"]),
-        ("Market",      4, "vendor",    ["Spice Vendor", "Forex Dealer", "Shop Owner", "Tea Seller"]),
-        ("Industrial",  3, "worker",    ["Plant Operator", "Logistics Hand", "Shift Foreman"]),
-        ("Residential", 3, "citizen",   ["Homemaker", "Retired Teacher", "IT Consultant"]),
-        ("Park",        2, "visitor",   ["Jogger", "Street Photographer"]),
-    ]
+def spawn_agents(scenario: Dict[str, Any], zones_by_name: Optional[Dict] = None) -> List[Agent]:
+    """Create agent population for a scenario. Uses scenario['agents'] if provided (dynamic path),
+    otherwise falls back to the hardcoded 24-agent plan (legacy/backward-compat path)."""
+    zbm = zones_by_name if zones_by_name is not None else ZONES_BY_NAME
     agents: List[Agent] = []
     idx = 0
-    for zone_name, count, archetype, names in plan:
-        for i in range(count):
-            x, y = _rand_in_zone(zone_name)
+
+    agent_plan = scenario.get("agents") or []
+    if agent_plan:
+        # Dynamic path: use the generated agents list from the scenario
+        for a_def in agent_plan:
+            zone_name = a_def.get("zone", "")
+            if zone_name not in zbm:
+                # Fallback: use first available zone
+                zone_name = next(iter(zbm), zone_name)
+            x, y = _rand_in_zone(zone_name, zbm)
             agents.append(Agent(
-                id=f"{archetype[:3]}_{idx:02d}",
-                name=names[i] if i < len(names) else f"{archetype.title()} {i}",
+                id=a_def.get("id") or f"{a_def.get('archetype', 'unk')[:3]}_{idx:02d}",
+                name=a_def.get("name", f"Agent {idx}"),
                 zone=zone_name,
-                archetype=archetype,
+                archetype=a_def.get("archetype", "citizen"),
                 x=x, y=y,
             ))
             idx += 1
+    else:
+        # Legacy path: hardcoded 24-agent plan
+        plan = [
+            ("Government",  4, "official",  ["PMO Aide", "MEA Officer", "NSA Analyst", "Cabinet Secretary"]),
+            ("University",  4, "student",   ["PhD Scholar", "JNU Student", "Debate Captain", "Journalism Major"]),
+            ("Market",      4, "vendor",    ["Spice Vendor", "Forex Dealer", "Shop Owner", "Tea Seller"]),
+            ("Industrial",  3, "worker",    ["Plant Operator", "Logistics Hand", "Shift Foreman"]),
+            ("Residential", 3, "citizen",   ["Homemaker", "Retired Teacher", "IT Consultant"]),
+            ("Park",        2, "visitor",   ["Jogger", "Street Photographer"]),
+        ]
+        for zone_name, count, archetype, names in plan:
+            for i in range(count):
+                x, y = _rand_in_zone(zone_name, zbm)
+                agents.append(Agent(
+                    id=f"{archetype[:3]}_{idx:02d}",
+                    name=names[i] if i < len(names) else f"{archetype.title()} {i}",
+                    zone=zone_name,
+                    archetype=archetype,
+                    x=x, y=y,
+                ))
+                idx += 1
 
-    for j in range(scenario["journalist_count"]):
-        zone = random.choice(["Market", "Government", "University"])
-        x, y = _rand_in_zone(zone)
+    journalist_count = scenario.get("journalist_count", 4)
+    zone_names = list(zbm.keys())
+    origin_zones = scenario.get("origin_zones") or zone_names[:2]
+    journalist_zones = [z for z in origin_zones if z in zbm] or zone_names[:2] or zone_names
+    for j in range(journalist_count):
+        zone = random.choice(journalist_zones)
+        x, y = _rand_in_zone(zone, zbm)
         agents.append(Agent(
             id=f"jnl_{j:02d}",
             name=f"Reporter {chr(ord('A') + j)}",
@@ -343,17 +490,27 @@ def _generate_personas(client: LLMClient, agents: List[Agent], scenario: Dict[st
     return out
 
 
-def _clamp_in_zone(agent: Agent) -> None:
-    x0, y0, x1, y1 = ZONES_BY_NAME[agent.zone]["bbox"]
+def _clamp_in_zone(agent: Agent, zones_by_name: Optional[Dict] = None) -> None:
+    zbm = zones_by_name if zones_by_name is not None else ZONES_BY_NAME
+    zone_info = zbm.get(agent.zone)
+    if not zone_info:
+        return
+    x0, y0, x1, y1 = zone_info["bbox"]
     agent.x = max(x0 + 0.3, min(x1 - 0.3, agent.x))
     agent.y = max(y0 + 0.3, min(y1 - 0.3, agent.y))
 
 
-def _move_agent(agent: Agent, tick: int) -> None:
+def _move_agent(agent: Agent, tick: int, zones_by_name: Optional[Dict] = None) -> None:
+    zbm = zones_by_name if zones_by_name is not None else ZONES_BY_NAME
+    zone_names = list(zbm.keys())
+
     if agent.archetype == "journalist":
         if tick % 12 == 0 or agent.vx == agent.vy == 0:
-            target_zone = random.choice([z["name"] for z in ZONES if z["name"] != agent.zone])
-            tx, ty = _zone_center(target_zone)
+            other_zones = [z for z in zone_names if z != agent.zone]
+            if not other_zones:
+                other_zones = zone_names
+            target_zone = random.choice(other_zones)
+            tx, ty = _zone_center(target_zone, zbm)
             dx, dy = tx - agent.x, ty - agent.y
             mag = (dx * dx + dy * dy) ** 0.5 or 1.0
             agent.vx, agent.vy = dx / mag * 0.9, dy / mag * 0.9
@@ -366,10 +523,9 @@ def _move_agent(agent: Agent, tick: int) -> None:
 
     # Phase 5: non-journalist migration
     if agent.migration_target and agent.migration_target != agent.zone:
-        tx, ty = _zone_center(agent.migration_target)
+        tx, ty = _zone_center(agent.migration_target, zbm)
         dx, dy = tx - agent.x, ty - agent.y
         dist = (dx * dx + dy * dy) ** 0.5 or 1.0
-        # Steer with some noise
         agent.vx = 0.85 * (dx / dist * 0.8) + random.uniform(-0.15, 0.15)
         agent.vy = 0.85 * (dy / dist * 0.8) + random.uniform(-0.15, 0.15)
         agent.x += agent.vx
@@ -377,9 +533,11 @@ def _move_agent(agent: Agent, tick: int) -> None:
         agent.x = max(1.0, min(GRID_W - 1.0, agent.x))
         agent.y = max(1.0, min(GRID_H - 1.0, agent.y))
         # Update zone if we've entered target bbox
-        x0, y0, x1, y1 = ZONES_BY_NAME[agent.migration_target]["bbox"]
-        if x0 <= agent.x <= x1 and y0 <= agent.y <= y1:
-            agent.zone = agent.migration_target
+        target_info = zbm.get(agent.migration_target)
+        if target_info:
+            x0, y0, x1, y1 = target_info["bbox"]
+            if x0 <= agent.x <= x1 and y0 <= agent.y <= y1:
+                agent.zone = agent.migration_target
         return
 
     # Default: brownian motion within zone
@@ -387,16 +545,20 @@ def _move_agent(agent: Agent, tick: int) -> None:
     agent.vy = 0.7 * agent.vy + random.uniform(-0.4, 0.4)
     agent.x += agent.vx
     agent.y += agent.vy
-    _clamp_in_zone(agent)
+    _clamp_in_zone(agent, zbm)
 
 
-def _propagate(agents: List[Agent], scenario: Dict[str, Any], tick: int) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _propagate(agents: List[Agent], scenario: Dict[str, Any], tick: int,
+               mesa_model=None) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Continuous stance diffusion.
 
     For each pair within PROXIMITY_R, each narrative's stance diffuses from
     source to target weighted by: src.influence * tanh(src.stance) * distance_decay
     * target.susceptibility / (1 + target.exposure). Opposing stances diffuse at
     half strength (cognitive friction). Stances clipped to [-1, 1].
+
+    Uses Mesa ContinuousSpace for neighbour queries when available (faster at scale).
+    Falls back to manual O(n²) loop otherwise.
 
     Returns (flipped_ids, transfer_events, candidate_events) — candidate_events
     lists strong encounters that the dialog pool may pick up (Phase 2).
@@ -408,81 +570,85 @@ def _propagate(agents: List[Agent], scenario: Dict[str, Any], tick: int) -> Tupl
     was_informed = {a.id: a.is_informed() for a in agents}
     prior_stances = {a.id: dict(a.stances) for a in agents}
 
-    r2 = PROXIMITY_R * PROXIMITY_R
-    for i in range(len(agents)):
-        a = agents[i]
-        for j in range(i + 1, len(agents)):
-            b = agents[j]
-            dx, dy = a.x - b.x, a.y - b.y
-            d2 = dx * dx + dy * dy
-            if d2 > r2:
-                continue
-            dist = math.sqrt(max(d2, 0.0001))
-            decay = math.exp(-dist / PROXIMITY_R)
+    def _apply_pair(a: Agent, b: Agent) -> None:
+        dx, dy = a.x - b.x, a.y - b.y
+        d2 = dx * dx + dy * dy
+        dist = math.sqrt(max(d2, 0.0001))
+        decay = math.exp(-dist / PROXIMITY_R)
 
-            a_inf = float(a.persona.get("influence", 1.0))
-            a_sus = float(a.persona.get("susceptibility", 1.0))
-            b_inf = float(b.persona.get("influence", 1.0))
-            b_sus = float(b.persona.get("susceptibility", 1.0))
+        a_inf = float(a.persona.get("influence", 1.0))
+        a_sus = float(a.persona.get("susceptibility", 1.0))
+        b_inf = float(b.persona.get("influence", 1.0))
+        b_sus = float(b.persona.get("susceptibility", 1.0))
 
-            max_shift = 0.0
-            dominant_n = None
-            for n in narratives:
-                sa = a.stances.get(n, 0.0)
-                sb = b.stances.get(n, 0.0)
-                # a -> b
-                if abs(sa) > 0.05:
-                    damp = 0.5 if sa * sb < 0 else 1.0
-                    ex_discount = 1.0 / (1.0 + 0.3 * b.exposure.get(n, 0))
-                    delta_b = a_inf * math.tanh(sa) * 0.22 * decay * b_sus * damp * ex_discount
-                    b.stances[n] = max(-1.0, min(1.0, sb + delta_b))
-                    b.exposure[n] = b.exposure.get(n, 0) + 1
-                    if abs(delta_b) > abs(max_shift):
-                        max_shift = delta_b
-                        dominant_n = n
-                # b -> a
-                if abs(sb) > 0.05:
-                    damp = 0.5 if sa * sb < 0 else 1.0
-                    ex_discount = 1.0 / (1.0 + 0.3 * a.exposure.get(n, 0))
-                    delta_a = b_inf * math.tanh(sb) * 0.22 * decay * a_sus * damp * ex_discount
-                    a.stances[n] = max(-1.0, min(1.0, sa + delta_a))
-                    a.exposure[n] = a.exposure.get(n, 0) + 1
-                    if abs(delta_a) > abs(max_shift):
-                        max_shift = delta_a
-                        dominant_n = n
+        max_shift = 0.0
+        dominant_n = None
+        for n in narratives:
+            sa = a.stances.get(n, 0.0)
+            sb = b.stances.get(n, 0.0)
+            if abs(sa) > 0.05:
+                damp = 0.5 if sa * sb < 0 else 1.0
+                ex_discount = 1.0 / (1.0 + 0.3 * b.exposure.get(n, 0))
+                delta_b = a_inf * math.tanh(sa) * 0.22 * decay * b_sus * damp * ex_discount
+                b.stances[n] = max(-1.0, min(1.0, sb + delta_b))
+                b.exposure[n] = b.exposure.get(n, 0) + 1
+                if abs(delta_b) > abs(max_shift):
+                    max_shift = delta_b
+                    dominant_n = n
+            if abs(sb) > 0.05:
+                damp = 0.5 if sa * sb < 0 else 1.0
+                ex_discount = 1.0 / (1.0 + 0.3 * a.exposure.get(n, 0))
+                delta_a = b_inf * math.tanh(sb) * 0.22 * decay * a_sus * damp * ex_discount
+                a.stances[n] = max(-1.0, min(1.0, sa + delta_a))
+                a.exposure[n] = a.exposure.get(n, 0) + 1
+                if abs(delta_a) > abs(max_shift):
+                    max_shift = delta_a
+                    dominant_n = n
 
-            a.last_interaction_tick = tick
-            b.last_interaction_tick = tick
+        a.last_interaction_tick = tick
+        b.last_interaction_tick = tick
 
-            # Only record meaningful transfers (avoid noise from tiny diffusions)
-            if dominant_n is not None and abs(max_shift) > 0.01:
-                # Source of the shift: whoever had the stronger stance on dominant_n
-                sa_d = prior_stances[a.id].get(dominant_n, 0.0)
-                sb_d = prior_stances[b.id].get(dominant_n, 0.0)
-                if abs(sa_d) >= abs(sb_d):
-                    src, dst = a, b
-                else:
-                    src, dst = b, a
-                transfers.append({
-                    "from": src.id,
-                    "to": dst.id,
-                    "belief": dominant_n,
-                })
-                # Flag strong encounters for potential LLM dialog escalation
-                if (abs(max_shift) > 0.06 and
+        if dominant_n is not None and abs(max_shift) > 0.01:
+            sa_d = prior_stances[a.id].get(dominant_n, 0.0)
+            sb_d = prior_stances[b.id].get(dominant_n, 0.0)
+            src, dst = (a, b) if abs(sa_d) >= abs(sb_d) else (b, a)
+            transfers.append({"from": src.id, "to": dst.id, "belief": dominant_n})
+            if (abs(max_shift) > 0.06 and
                     (src.persona.get("influence", 1.0) >= 2.0 or
-                     src.archetype == "journalist" or
-                     dst.archetype == "journalist")):
-                    candidate_dialogs.append({
-                        "a_id": a.id,
-                        "b_id": b.id,
-                        "narrative": dominant_n,
-                        "prior_a": prior_stances[a.id].get(dominant_n, 0.0),
-                        "prior_b": prior_stances[b.id].get(dominant_n, 0.0),
-                        "delta": max_shift,
-                        "x": (a.x + b.x) / 2,
-                        "y": (a.y + b.y) / 2,
-                    })
+                     src.archetype == "journalist" or dst.archetype == "journalist")):
+                candidate_dialogs.append({
+                    "a_id": a.id, "b_id": b.id, "narrative": dominant_n,
+                    "prior_a": prior_stances[a.id].get(dominant_n, 0.0),
+                    "prior_b": prior_stances[b.id].get(dominant_n, 0.0),
+                    "delta": max_shift,
+                    "x": (a.x + b.x) / 2, "y": (a.y + b.y) / 2,
+                })
+
+    if mesa_model is not None and _MESA_AVAILABLE:
+        # Mesa path: sync positions then query neighbours per agent
+        mesa_model.sync_positions(agents)
+        seen_pairs: set = set()
+        for a in agents:
+            neighbours = mesa_model.get_neighbors_for(a.id, PROXIMITY_R)
+            for b in neighbours:
+                pair = (min(a.id, b.id), max(a.id, b.id))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                _apply_pair(a, b)
+    else:
+        # Fallback: manual O(n²) loop
+        r2 = PROXIMITY_R * PROXIMITY_R
+        for i in range(len(agents)):
+            a = agents[i]
+            for j in range(i + 1, len(agents)):
+                b = agents[j]
+                dx, dy = a.x - b.x, a.y - b.y
+                d2 = dx * dx + dy * dy
+                if d2 > r2:
+                    continue
+                _apply_pair(a, b)
+
 
     # Newly-informed agents = those whose is_informed() flipped this tick
     flipped: List[str] = []
@@ -748,14 +914,81 @@ def _maybe_set_migration_targets(agents: List[Agent]) -> None:
         a.migration_target = best
 
 
-def _run_loop(simulation_id: str, scenario_id: str) -> None:
-    scenario = SCENARIOS[scenario_id]
-    agents = spawn_agents(scenario)
+def _tick_concordia_event(gm_sim, tick: int, agents: List[Agent], scenario: Dict[str, Any], zones_by_name: Dict) -> Optional[Dict[str, Any]]:
+    """Ask the Concordia GM what narrative event happens this tick. Returns an event dict or None."""
+    zone_summary = []
+    for zone_name in zones_by_name:
+        zone_agents = [a for a in agents if a.zone == zone_name]
+        informed = sum(1 for a in zone_agents if a.is_informed())
+        zone_summary.append(f"{zone_name}: {informed}/{len(zone_agents)} informed")
+    total_informed = sum(1 for a in agents if a.is_informed())
+    state_text = (
+        f"Tick {tick}/{scenario.get('total_ticks', TOTAL_TICKS)}. "
+        f"Zone state: {'; '.join(zone_summary)}. "
+        f"Total informed: {total_informed}/{len(agents)}."
+    )
+    try:
+        premise = (
+            f"{scenario['seed']}\n\nCurrent state at tick {tick}: {state_text}\n"
+            "Describe what narrative event happens next in one sentence. Be specific and dramatic."
+        )
+        log = gm_sim.play(premise=premise)
+        # SimulationLog uses .entries (list of StructuredLogEntry), not .events
+        text = ""
+        if log:
+            # get_summary() returns a human-readable string of the whole run
+            summary = log.get_summary()
+            if summary:
+                # Take just the last line as the event text
+                lines = [l.strip() for l in summary.strip().splitlines() if l.strip()]
+                text = lines[-1] if lines else ""
+            # Fallback: scan entries for game master output
+            if not text and log.entries:
+                for entry in reversed(log.entries):
+                    if entry.entity_name and "game" in entry.entity_name.lower():
+                        raw = log.content_store.get(entry.step, {}) if hasattr(log, 'content_store') else {}
+                        break
+                # Last resort: just use any entry summary
+                if not text and log.entries:
+                    last = log.entries[-1]
+                    text = getattr(last, 'summary', '') or ''
+        if not text:
+            return None
+        return {"tick": tick, "kind": "gm_event", "zone": None, "text": text[:200], "stance_nudge": {}}
+    except Exception as e:
+        logger.warning(f"Concordia GM tick {tick} failed: {e}")
+        return None
+
+
+def _run_loop(simulation_id: str, scenario: Dict[str, Any], zones_by_name: Dict) -> None:
+    agents = spawn_agents(scenario, zones_by_name)
     agents_by_id = {a.id: a for a in agents}
     client = LLMClient()
+    total_ticks = scenario.get("total_ticks", TOTAL_TICKS)
+
+    # Instantiate Mesa spatial model if available
+    mesa_model = None
+    if _MESA_AVAILABLE and _SpatialMesaModel is not None:
+        try:
+            mesa_model = _SpatialMesaModel(agents, GRID_W, GRID_H)
+            logger.info(f"[{simulation_id}] Mesa ContinuousSpace initialised ({len(agents)} agents)")
+        except Exception as e:
+            logger.warning(f"[{simulation_id}] Mesa init failed, falling back to O(n²) loop: {e}")
+            mesa_model = None
+
+    # Instantiate Concordia GM if available
+    gm_sim = None
+    if _CONCORDIA_AVAILABLE and _ClaudeLM is not None and _build_concordia_gm is not None:
+        try:
+            lm = _ClaudeLM()
+            gm_sim = _build_concordia_gm(scenario, lm)
+            logger.info(f"[{simulation_id}] Concordia GM initialised")
+        except Exception as e:
+            logger.warning(f"[{simulation_id}] Concordia GM init failed: {e}")
+            gm_sim = None
 
     with _STATE_LOCK:
-        SPATIAL_STATE[simulation_id]["total_ticks"] = TOTAL_TICKS
+        SPATIAL_STATE[simulation_id]["total_ticks"] = total_ticks
         SPATIAL_STATE[simulation_id]["status"] = "running"
 
     # Phase 1: personas (1 batched LLM call)
@@ -799,7 +1032,7 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
     MAX_DIALOG_CALLS_PER_TICK = 4
     last_thought_stance: Dict[str, Dict[str, float]] = {a.id: dict(a.stances) for a in agents}
 
-    for tick in range(1, TOTAL_TICKS + 1):
+    for tick in range(1, total_ticks + 1):
         # Phase 4: scripted events
         tick_events: List[Dict[str, Any]] = []
         for idx, ev in enumerate(event_schedule):
@@ -823,6 +1056,12 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
                     "stance_nudge": nudge,
                 })
 
+        # Concordia GM narrative events (every GM_TICK_INTERVAL ticks)
+        if gm_sim is not None and tick % GM_TICK_INTERVAL == 0:
+            gm_event = _tick_concordia_event(gm_sim, tick, agents, scenario, zones_by_name)
+            if gm_event:
+                tick_events.append(gm_event)
+
         # Phase 5: set migration targets this tick
         _maybe_set_migration_targets(agents)
 
@@ -830,7 +1069,7 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
         migrations_this_tick: List[Dict[str, Any]] = []
         for a in agents:
             prev_zone = a.zone
-            _move_agent(a, tick)
+            _move_agent(a, tick, zones_by_name)
             if prev_zone != a.zone:
                 reason = "migration" if a.migration_target == a.zone else "wander"
                 migrations_this_tick.append({
@@ -841,7 +1080,7 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
                     a.migration_target = None
 
         # Propagate (continuous stance diffusion)
-        flipped, transfers, candidate_dialogs = _propagate(agents, scenario, tick)
+        flipped, transfers, candidate_dialogs = _propagate(agents, scenario, tick, mesa_model=mesa_model)
 
         # Phase 4: "recent dispatch" influence bonus on nearby agents
         for jid, meta in list(recent_dispatch_meta.items()):
@@ -999,8 +1238,8 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
             continue
         a.stances[n] = max(-1.0, min(1.0, a.stances.get(n, 0.0) + res["shift_a"]))
         b.stances[n] = max(-1.0, min(1.0, b.stances.get(n, 0.0) + res["shift_b"]))
-        landed = min(meta["tick_submitted"] + 2, TOTAL_TICKS)
-        target = snaps_by_tick.get(landed) or snaps_by_tick[TOTAL_TICKS]
+        landed = min(meta["tick_submitted"] + 2, total_ticks)
+        target = snaps_by_tick.get(landed) or snaps_by_tick[total_ticks]
         target["dialogs"].append({
             "a_id": a.id, "b_id": b.id,
             "a_name": a.name, "b_name": b.name,
@@ -1014,8 +1253,8 @@ def _run_loop(simulation_id: str, scenario_id: str) -> None:
             text = fut.result()
         except Exception:
             continue
-        landed = min(meta["tick"] + 2, TOTAL_TICKS)
-        target = snaps_by_tick.get(landed) or snaps_by_tick[TOTAL_TICKS]
+        landed = min(meta["tick"] + 2, total_ticks)
+        target = snaps_by_tick.get(landed) or snaps_by_tick[total_ticks]
         target["dispatches"].append({
             "journalist_id": meta["journalist_id"], "tick": landed,
             "submitted_at": meta["tick"], "narrative": meta["narrative"], "text": text,
@@ -1037,6 +1276,7 @@ def _persist(simulation_id: str) -> None:
         payload = {
             "simulation_id": simulation_id,
             "scenario_id": sim.get("scenario_id"),
+            "scenario": sim.get("scenario"),
             "status": sim.get("status"),
             "total_ticks": sim.get("total_ticks"),
             "snapshots": sim.get("snapshots", []),
@@ -1199,7 +1439,8 @@ def _synthesize_report(simulation_id: str, agents: List[Agent], scenario: Dict[s
 
     # Format structured data for LLM consumption
     zone_lines = []
-    for z in [z["name"] for z in ZONES]:
+    zones_list = scenario.get("zones") or ZONES
+    for z in [z["name"] for z in zones_list]:
         s = by_zone.get(z)
         if not s:
             continue
@@ -1295,19 +1536,32 @@ def _synthesize_report(simulation_id: str, agents: List[Agent], scenario: Dict[s
     }
 
 
-def start_simulation(scenario_id: str) -> str:
-    if scenario_id not in SCENARIOS:
-        raise ValueError(f"Unknown scenario: {scenario_id}")
+def start_simulation(scenario_id: Optional[str] = None, scenario_dict: Optional[Dict[str, Any]] = None) -> str:
+    if scenario_dict:
+        scenario = scenario_dict
+        scenario_id = scenario.get("id") or f"gen_{uuid.uuid4().hex[:8]}"
+    elif scenario_id:
+        if scenario_id not in SCENARIOS:
+            raise ValueError(f"Unknown scenario: {scenario_id}")
+        scenario = SCENARIOS[scenario_id]
+    else:
+        raise ValueError("Either scenario_id or scenario_dict must be provided")
+
+    zones_list = scenario.get("zones") or ZONES
+    zones_by_name = {z["name"]: z for z in zones_list}
+
     simulation_id = f"spatial_{uuid.uuid4().hex[:10]}"
     with _STATE_LOCK:
         SPATIAL_STATE[simulation_id] = {
             "scenario_id": scenario_id,
+            "scenario": scenario,
+            "zones": zones_list,
             "status": "queued",
             "snapshots": [],
             "report": None,
-            "total_ticks": TOTAL_TICKS,
+            "total_ticks": scenario.get("total_ticks", TOTAL_TICKS),
         }
-    thread = threading.Thread(target=_run_loop, args=(simulation_id, scenario_id), daemon=True)
+    thread = threading.Thread(target=_run_loop, args=(simulation_id, scenario, zones_by_name), daemon=True)
     thread.start()
     logger.info(f"Started spatial sim {simulation_id} for scenario {scenario_id}")
     return simulation_id
@@ -1326,6 +1580,7 @@ def get_state_since(simulation_id: str, since_tick: int) -> Dict[str, Any]:
             "total_ticks": sim["total_ticks"],
             "snapshots": snaps,
             "latest_tick": sim["snapshots"][-1]["tick"] if sim["snapshots"] else -1,
+            "zones": sim.get("zones", ZONES),
         }
 
 
@@ -1400,7 +1655,9 @@ def load_persisted_run(simulation_id: str) -> Optional[Dict[str, Any]]:
 
     snapshots = payload.get("snapshots") or []
     scenario_id = payload.get("scenario_id")
-    scenario = SCENARIOS.get(scenario_id) if scenario_id else None
+    # Prefer embedded scenario (dynamic runs); fall back to global SCENARIOS dict
+    scenario = payload.get("scenario") or (SCENARIOS.get(scenario_id) if scenario_id else None)
+    zones_list = (scenario.get("zones") if scenario else None) or ZONES
 
     agents: List[Agent] = []
     if snapshots:
@@ -1410,11 +1667,12 @@ def load_persisted_run(simulation_id: str) -> Optional[Dict[str, Any]]:
     with _STATE_LOCK:
         SPATIAL_STATE[simulation_id] = {
             "scenario_id": scenario_id,
+            "scenario": scenario,
+            "zones": zones_list,
             "status": "done",
             "snapshots": snapshots,
             "report": payload.get("report"),
             "total_ticks": payload.get("total_ticks", TOTAL_TICKS),
-            "scenario": scenario,
             "agents": agents,
         }
     logger.info(f"Rehydrated persisted run {simulation_id} ({len(snapshots)} snapshots, {len(agents)} agents)")

@@ -2,8 +2,13 @@ import service from './index'
 
 export const getSpatialScenarios = () => service.get('/api/spatial/scenarios')
 
-export const startSpatialSim = (scenario) =>
-  service.post('/api/spatial/start', { scenario })
+export const generateSpatialScenario = (graphId, requirement = '') =>
+  service.post('/api/spatial/generate', { graph_id: graphId, requirement })
+
+export const startSpatialSim = (scenario, scenarioDict = null) => {
+  const body = scenarioDict ? { scenario_dict: scenarioDict } : { scenario }
+  return service.post('/api/spatial/start', body)
+}
 
 export const getSpatialState = (simId, since = -1) =>
   service.get(`/api/spatial/${simId}/state`, { params: { since } })
