@@ -163,123 +163,193 @@
         />
       </div>
 
-      <!-- Right drawer: summary + thoughts -->
+      <!-- Right drawer: intelligence panel -->
       <aside class="drawer" :class="{ open: drawerOpen }">
-        <button class="drawer-toggle" @click="drawerOpen = !drawerOpen" :title="drawerOpen ? 'Hide' : 'Show'">
-          <span v-if="drawerOpen">▶</span>
-          <span v-else>◀</span>
+        <button class="drawer-toggle" @click="drawerOpen = !drawerOpen" :title="drawerOpen ? 'Collapse' : 'Expand'">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path v-if="drawerOpen" d="M2 2L8 5L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <path v-else d="M8 2L2 5L8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
         </button>
 
+        <!-- Panel header -->
+        <div class="panel-header">
+          <div class="panel-header-top">
+            <span class="panel-sys-tag">SPATIAL INTEL</span>
+            <span class="panel-status-dot" :class="simStatus === 'done' ? 'done' : 'live'"></span>
+          </div>
+          <div class="panel-title">{{ currentScenario?.title || 'SIMULATION' }}</div>
+          <div class="panel-meta mono">
+            <span>SIM {{ currentSimId?.slice(-8).toUpperCase() || '--------' }}</span>
+            <span class="panel-sep">·</span>
+            <span>{{ totalTicks }} TICKS</span>
+            <span class="panel-sep">·</span>
+            <span :class="simStatus === 'done' ? 'clr-green' : 'clr-amber'">{{ simStatus === 'done' ? 'COMPLETE' : 'RUNNING' }}</span>
+          </div>
+        </div>
+
+        <!-- Nav tabs -->
+        <div class="panel-nav">
+          <button v-for="t in debriefTabs" :key="t.id"
+            class="pnav-btn" :class="{ active: debriefTab === t.id }"
+            @click="debriefTab = t.id">
+            <span class="pnav-label">{{ t.label }}</span>
+            <span v-if="t.count" class="pnav-count mono">{{ t.count }}</span>
+          </button>
+        </div>
+
         <div class="drawer-scroll">
-          <div class="drawer-section">
-            <div class="drawer-label">DEBRIEF</div>
-            <div v-if="!report" class="drawer-pending">
-              <span class="pulse"></span>
-              The simulation is still running. The debrief will synthesize once all {{ totalTicks }} ticks complete.
+
+          <!-- ── ANALYSIS TAB ── -->
+          <template v-if="debriefTab === 'sections'">
+            <div v-if="!report" class="intel-pending">
+              <div class="intel-pending-icon">
+                <span class="intel-pulse"></span>
+              </div>
+              <div class="intel-pending-text">
+                <div class="intel-pending-title">ANALYSIS IN PROGRESS</div>
+                <div class="intel-pending-sub">Synthesis queued for T{{ totalTicks }} completion · {{ loadedMaxTick }}/{{ totalTicks }} ticks loaded</div>
+              </div>
             </div>
             <template v-else>
-              <div class="debrief-tabs">
-                <button
-                  v-for="t in debriefTabs"
-                  :key="t.id"
-                  class="dtab"
-                  :class="{ active: debriefTab === t.id }"
-                  @click="debriefTab = t.id"
-                >{{ t.label }}<span v-if="t.count" class="dtab-n mono">·{{ t.count }}</span></button>
-              </div>
-
-              <div v-if="debriefTab === 'sections'" class="debrief-sections">
-                <template v-if="report.sections?.length">
-                  <div v-for="(s, i) in report.sections" :key="i" class="debrief-section">
-                    <div class="debrief-section-title">{{ s.title }}</div>
-                    <div class="debrief-section-body">{{ s.content }}</div>
-                  </div>
-                </template>
-                <div v-else class="drawer-summary">{{ report.narrative || 'No summary available.' }}</div>
-              </div>
-
-              <div v-if="debriefTab === 'chain'" class="debrief-list">
-                <div v-if="!report.convert_chain?.length" class="drawer-empty">No chain recorded.</div>
-                <div v-for="(c, i) in report.convert_chain" :key="i" class="chain-row">
-                  <span class="chain-tick mono">T{{ String(c.tick).padStart(2, '0') }}</span>
-                  <span class="chain-name">{{ c.informer_name }}</span>
-                  <span class="chain-arrow">→</span>
-                  <span class="chain-name">{{ c.agent_name }}</span>
+              <div v-for="(s, i) in report.sections" :key="i" class="intel-section">
+                <div class="intel-section-header">
+                  <span class="intel-section-num mono">{{ String(i + 1).padStart(2, '0') }}</span>
+                  <span class="intel-section-title">{{ s.title?.toUpperCase() }}</span>
                 </div>
+                <div class="intel-section-body">{{ s.content }}</div>
               </div>
+              <div v-if="!report.sections?.length" class="intel-section">
+                <div class="intel-section-body">{{ report.narrative || 'No analysis available.' }}</div>
+              </div>
+            </template>
+          </template>
 
-              <div v-if="debriefTab === 'dissent'" class="debrief-list">
-                <div v-if="!report.dissenters?.length" class="drawer-empty">No significant dissenters.</div>
-                <div v-for="(d, i) in report.dissenters" :key="i" class="dissent-card">
-                  <div class="dissent-head">
-                    <span class="dissent-name">{{ d.name }}</span>
-                    <span class="dissent-zone mono">· {{ d.zone }} · {{ d.archetype }}</span>
+          <!-- ── CHAIN TAB ── -->
+          <template v-if="debriefTab === 'chain'">
+            <div v-if="!report" class="intel-pending-inline">Awaiting simulation completion…</div>
+            <div v-else-if="!report.convert_chain?.length" class="intel-empty">NO PROPAGATION CHAIN RECORDED</div>
+            <template v-else>
+              <div class="chain-header mono">
+                <span>TICK</span><span>SOURCE</span><span>TARGET</span>
+              </div>
+              <div v-for="(c, i) in report.convert_chain" :key="i" class="chain-entry" :class="{ 'chain-entry-alt': i % 2 === 1 }">
+                <span class="ce-tick mono">T{{ String(c.tick).padStart(2, '0') }}</span>
+                <span class="ce-name">{{ c.informer_name }}</span>
+                <svg class="ce-arrow" width="14" height="8" viewBox="0 0 14 8">
+                  <path d="M0 4H12M9 1L13 4L9 7" stroke="#475569" stroke-width="1.2" stroke-linecap="round"/>
+                </svg>
+                <span class="ce-name ce-target">{{ c.agent_name }}</span>
+              </div>
+            </template>
+          </template>
+
+          <!-- ── DISSENT TAB ── -->
+          <template v-if="debriefTab === 'dissent'">
+            <div v-if="!report" class="intel-pending-inline">Awaiting simulation completion…</div>
+            <div v-else-if="!report.dissenters?.length" class="intel-empty">NO SIGNIFICANT DIVERGENCE DETECTED</div>
+            <template v-else>
+              <div v-for="(d, i) in report.dissenters" :key="i" class="dissent-entry">
+                <div class="de-top">
+                  <div class="de-identity">
+                    <span class="de-name">{{ d.name }}</span>
+                    <span class="de-badge mono">{{ d.archetype?.toUpperCase() }}</span>
                   </div>
-                  <div v-if="d.bio" class="dissent-bio">{{ d.bio }}</div>
-                  <div class="dissent-metric">
-                    <span class="mono dissent-key">{{ d.narrative?.replace(/_/g, ' ') }}</span>
-                    <span class="dissent-stance" :class="d.stance >= 0 ? 'pos' : 'neg'">stance {{ (d.stance >= 0 ? '+' : '') + d.stance.toFixed(2) }}</span>
-                    <span class="dissent-vs mono">vs zone {{ (d.zone_mean >= 0 ? '+' : '') + d.zone_mean.toFixed(2) }}</span>
-                  </div>
+                  <span class="de-zone mono">{{ d.zone }}</span>
                 </div>
-              </div>
-
-              <div v-if="debriefTab === 'turning'" class="debrief-list">
-                <div v-if="!report.turning_points?.length" class="drawer-empty">No sharp turning points.</div>
-                <div v-for="(p, i) in report.turning_points" :key="i" class="turning-row">
-                  <span class="chain-tick mono">T{{ String(p.tick).padStart(2, '0') }}</span>
-                  <div class="turning-body">
-                    <div class="turning-head">
-                      <span class="turning-zone">{{ p.zone }}</span>
-                      <span class="turning-narr mono">{{ p.narrative?.replace(/_/g, ' ') }}</span>
-                    </div>
-                    <div class="turning-delta">
-                      Δ {{ (p.delta >= 0 ? '+' : '') + p.delta.toFixed(2) }}
-                      <span class="turning-sub mono">{{ (p.value_before >= 0 ? '+' : '') + p.value_before.toFixed(2) }} → {{ (p.value_after >= 0 ? '+' : '') + p.value_after.toFixed(2) }}</span>
-                    </div>
+                <div v-if="d.bio" class="de-bio">{{ d.bio }}</div>
+                <div class="de-metrics">
+                  <div class="de-metric-row">
+                    <span class="de-metric-label mono">NARRATIVE</span>
+                    <span class="de-metric-val">{{ d.narrative?.replace(/_/g, ' ') }}</span>
+                  </div>
+                  <div class="de-metric-row">
+                    <span class="de-metric-label mono">STANCE</span>
+                    <span class="de-metric-val" :class="d.stance >= 0 ? 'clr-green' : 'clr-red'">
+                      {{ (d.stance >= 0 ? '+' : '') + d.stance.toFixed(3) }}
+                    </span>
+                    <span class="de-metric-vs mono">vs zone {{ (d.zone_mean >= 0 ? '+' : '') + d.zone_mean.toFixed(3) }}</span>
+                  </div>
+                  <div class="de-divergence-bar">
+                    <div class="de-div-fill" :style="{
+                      width: Math.min(100, Math.abs(d.divergence) * 100) + '%',
+                      background: d.divergence >= 0 ? '#22c55e' : '#ef4444'
+                    }"></div>
                   </div>
                 </div>
               </div>
             </template>
-          </div>
+          </template>
 
-          <div class="drawer-section">
-            <div class="drawer-label">STORY BEATS · {{ storyBeats.length }}</div>
-            <div v-if="!storyBeats.length" class="drawer-empty">Beats will appear as the story unfolds…</div>
-            <div v-else class="beats">
-              <button
-                v-for="(b, i) in storyBeats"
-                :key="i"
-                class="beat"
-                :class="['k-' + b.kind, { active: b.tick === activeBeat.tick && b.kind === activeBeat.kind }]"
-                @click="seekTo(b.tick)"
-              >
-                <span class="beat-tick mono">T{{ String(b.tick).padStart(2, '0') }}</span>
-                <span class="beat-kind">{{ b.kind }}</span>
-                <span class="beat-text">{{ b.text }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="drawer-section drawer-thoughts">
-            <div class="drawer-label">LIVE THOUGHT STREAM · {{ visibleThoughts.length }}</div>
-            <div v-if="visibleThoughts.length === 0" class="drawer-empty">
-              No agents have spoken yet. Watch the lights spread…
-            </div>
-            <div v-else class="thought-feed">
-              <div v-for="t in reversedThoughts" :key="t.key" class="tcard">
-                <div class="tcard-bar" :style="{ background: zoneColor(t.zone) }"></div>
-                <div class="tcard-body">
-                  <div class="tcard-meta">
-                    <span class="tcard-who">{{ t.name }}</span>
-                    <span class="tcard-zone" :style="{ color: zoneColor(t.zone) }">{{ t.zone.toUpperCase() }}</span>
-                    <span class="tcard-tick mono">T{{ String(t.tick).padStart(2, '0') }}</span>
-                  </div>
-                  <div class="tcard-text">"{{ t.text }}"</div>
+          <!-- ── TURNS TAB ── -->
+          <template v-if="debriefTab === 'turning'">
+            <div v-if="!report" class="intel-pending-inline">Awaiting simulation completion…</div>
+            <div v-else-if="!report.turning_points?.length" class="intel-empty">NO SHARP INFLECTION POINTS DETECTED</div>
+            <template v-else>
+              <div v-for="(p, i) in report.turning_points" :key="i" class="turn-entry" @click="seekTo(p.tick)" style="cursor:pointer">
+                <div class="turn-top">
+                  <span class="turn-tick mono">T{{ String(p.tick).padStart(2, '0') }}</span>
+                  <span class="turn-delta mono" :class="p.delta >= 0 ? 'clr-green' : 'clr-red'">
+                    {{ p.delta >= 0 ? '▲' : '▼' }} {{ Math.abs(p.delta).toFixed(3) }}
+                  </span>
                 </div>
+                <div class="turn-meta">
+                  <span class="turn-zone">{{ p.zone }}</span>
+                  <span class="turn-sep">·</span>
+                  <span class="turn-narr mono">{{ p.narrative?.replace(/_/g, ' ') }}</span>
+                </div>
+                <div class="turn-track">
+                  <span class="turn-val mono">{{ (p.value_before >= 0 ? '+' : '') + p.value_before.toFixed(2) }}</span>
+                  <div class="turn-bar-wrap">
+                    <div class="turn-bar-before" :style="{ width: (Math.abs(p.value_before) * 50) + '%', background: p.value_before >= 0 ? '#22c55e44' : '#ef444444' }"></div>
+                    <div class="turn-bar-after" :style="{ width: (Math.abs(p.value_after) * 50) + '%', background: p.value_after >= 0 ? '#22c55e' : '#ef4444' }"></div>
+                  </div>
+                  <span class="turn-val mono">{{ (p.value_after >= 0 ? '+' : '') + p.value_after.toFixed(2) }}</span>
+                </div>
+              </div>
+            </template>
+          </template>
+
+          <!-- ── STORY BEATS (always visible below tabs) ── -->
+          <div class="intel-divider">
+            <span class="intel-divider-label">EVENT LOG · {{ storyBeats.length }}</span>
+          </div>
+          <div v-if="!storyBeats.length" class="intel-empty">Monitoring… events will surface as simulation progresses.</div>
+          <div v-else class="beats-log">
+            <button v-for="(b, i) in storyBeats" :key="i"
+              class="blog-entry"
+              :class="['k-' + b.kind, { active: b.tick === activeBeat.tick && b.kind === activeBeat.kind }]"
+              @click="seekTo(b.tick)">
+              <div class="blog-left">
+                <span class="blog-tick mono">T{{ String(b.tick).padStart(2, '0') }}</span>
+                <span class="blog-kind-dot" :class="'k-' + b.kind"></span>
+              </div>
+              <div class="blog-right">
+                <span class="blog-kind mono">{{ b.kind.replace(/_/g, ' ').toUpperCase() }}</span>
+                <span class="blog-text">{{ b.text }}</span>
+              </div>
+            </button>
+          </div>
+
+          <!-- ── THOUGHT STREAM ── -->
+          <div class="intel-divider">
+            <span class="intel-divider-label">AGENT INTERCEPTS · {{ visibleThoughts.length }}</span>
+          </div>
+          <div v-if="!visibleThoughts.length" class="intel-empty">No transmissions intercepted yet.</div>
+          <div v-else class="intercept-feed">
+            <div v-for="t in reversedThoughts" :key="t.key" class="intercept-card">
+              <div class="ic-accent" :style="{ background: zoneColor(t.zone) }"></div>
+              <div class="ic-body">
+                <div class="ic-header">
+                  <span class="ic-name">{{ t.name }}</span>
+                  <span class="ic-zone mono" :style="{ color: zoneColor(t.zone) }">{{ t.zone }}</span>
+                  <span class="ic-tick mono">T{{ String(t.tick).padStart(2, '0') }}</span>
+                </div>
+                <div class="ic-text">"{{ t.text }}"</div>
               </div>
             </div>
           </div>
+
         </div>
       </aside>
 
@@ -1079,9 +1149,7 @@ onBeforeUnmount(() => {
 .gen-bar-btn:not(:disabled):hover { background: #ffb35a; }
 .gen-bar-error { font-size: 12px; color: #fca5a5; width: 100%; }
 
-/* GM events get a distinct amber color in beats */
-.beat.k-gm_event { border-color: rgba(251, 191, 36, 0.4); }
-.beat.k-gm_event .beat-kind { color: #fbbf24; }
+/* GM events — amber in caption strip */
 .caption .k-gm_event { color: #fbbf24; }
 
 /* Generating / preview phases */
@@ -1524,33 +1592,36 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 
-/* Right drawer */
+/* ============================================================
+   PALANTIR-STYLE INTELLIGENCE PANEL (Right Drawer)
+   ============================================================ */
 .drawer {
   position: absolute;
-  top: 100px;
+  top: 0;
   right: 0;
   bottom: 110px;
-  width: 380px;
-  background: rgba(10, 14, 24, 0.78);
-  backdrop-filter: blur(18px);
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  width: 400px;
+  background: rgba(6, 9, 18, 0.96);
+  backdrop-filter: blur(24px);
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
   transform: translateX(100%);
-  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
   z-index: 3;
   display: flex;
   flex-direction: column;
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
 }
 .drawer.open { transform: translateX(0); }
 .drawer-toggle {
   position: absolute;
-  left: -32px;
-  top: 20px;
-  width: 32px;
-  height: 52px;
+  left: -30px;
+  top: 24px;
+  width: 30px;
+  height: 48px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-right: 0;
-  border-radius: 8px 0 0 8px;
-  background: rgba(10, 14, 24, 0.78);
+  border-radius: 6px 0 0 6px;
+  background: rgba(6, 9, 18, 0.92);
   backdrop-filter: blur(14px);
   color: #cbd5e1;
   font-size: 12px;
@@ -1560,104 +1631,439 @@ onBeforeUnmount(() => {
   justify-content: center;
   transition: all 0.2s;
 }
-.drawer-toggle:hover { color: #ffc072; border-color: rgba(255, 179, 71, 0.3); }
+.drawer-toggle:hover { color: #00d4aa; border-color: rgba(0, 212, 170, 0.3); }
 
+/* Panel header */
+.panel-header {
+  padding: 20px 20px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 14px;
+  flex-shrink: 0;
+}
+.panel-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.panel-sys-tag {
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  color: #00d4aa;
+  font-weight: 700;
+}
+.panel-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.panel-status-dot.live { background: #f97316; animation: pip 1.2s ease-in-out infinite; }
+.panel-status-dot.done { background: #00d4aa; }
+.panel-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e6edf9;
+  letter-spacing: 0.3px;
+  line-height: 1.3;
+  margin-bottom: 6px;
+  font-family: 'Inter', sans-serif;
+}
+.panel-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #475569;
+  letter-spacing: 1px;
+}
+.panel-sep { color: #2d3748; }
+.clr-green { color: #00d4aa; }
+.clr-amber { color: #f97316; }
+.clr-red { color: #ef4444; }
+
+/* Nav tabs */
+.panel-nav {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+.pnav-btn {
+  flex: 1;
+  padding: 10px 4px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #475569;
+  font-size: 9.5px;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.pnav-btn:hover { color: #94a3b8; }
+.pnav-btn.active { color: #00d4aa; border-bottom-color: #00d4aa; }
+.pnav-count {
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #64748b;
+}
+.pnav-btn.active .pnav-count { color: #00d4aa; background: rgba(0, 212, 170, 0.1); }
+
+/* Scroll area */
 .drawer-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 22px 24px 22px 24px;
+  padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 26px;
 }
-.drawer-scroll::-webkit-scrollbar { width: 6px; }
+.drawer-scroll::-webkit-scrollbar { width: 4px; }
 .drawer-scroll::-webkit-scrollbar-track { background: transparent; }
-.drawer-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 3px; }
+.drawer-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 2px; }
 
-.drawer-section { display: flex; flex-direction: column; gap: 10px; }
-.drawer-section.drawer-thoughts { flex: 1; min-height: 0; }
-.drawer-label {
-  font-size: 10px;
-  letter-spacing: 2.5px;
-  font-weight: 700;
-  color: #ffc072;
-  font-family: 'JetBrains Mono', monospace;
+/* Common empty/pending states */
+.intel-empty {
+  padding: 20px;
+  font-size: 9.5px;
+  letter-spacing: 1.5px;
+  color: #2d3748;
+  text-align: center;
 }
-.drawer-summary {
-  font-size: 13px;
-  line-height: 1.65;
-  color: #cbd5e1;
-  white-space: pre-wrap;
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-.drawer-pending {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: rgba(234, 88, 12, 0.07);
-  border: 1px solid rgba(234, 88, 12, 0.2);
-  color: #fdba74;
-  font-size: 12.5px;
-  line-height: 1.55;
+.intel-pending-inline {
+  padding: 16px 20px;
+  font-size: 11px;
+  color: #475569;
   font-style: italic;
 }
-.pulse {
+
+/* Pending state */
+.intel-pending {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.intel-pending-icon {
   flex-shrink: 0;
-  margin-top: 5px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.intel-pulse {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ea580c;
-  animation: pip 1.4s ease-in-out infinite;
+  background: #f97316;
+  animation: pip 1.2s ease-in-out infinite;
 }
-.drawer-empty {
-  font-size: 12.5px;
-  color: #64748b;
-  font-style: italic;
-  padding: 12px 0;
+.intel-pending-text { flex: 1; }
+.intel-pending-title {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #f97316;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.intel-pending-sub {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.5;
 }
 
-.thought-feed {
+/* Analysis sections */
+.intel-section {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 16px 20px;
+}
+.intel-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.intel-section-num {
+  font-size: 9px;
+  color: #00d4aa;
+  letter-spacing: 1px;
+  font-weight: 700;
+  width: 20px;
+}
+.intel-section-title {
+  font-size: 9.5px;
+  letter-spacing: 2px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+.intel-section-body {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #8b9ab8;
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+}
+
+/* Chain tab */
+.chain-header {
+  display: grid;
+  grid-template-columns: 40px 1fr 1fr;
+  gap: 8px;
+  padding: 8px 20px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: #2d3748;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.2);
+}
+.chain-entry {
+  display: grid;
+  grid-template-columns: 40px 1fr auto 1fr;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: background 0.15s;
+}
+.chain-entry:hover { background: rgba(255, 255, 255, 0.025); }
+.chain-entry-alt { background: rgba(0, 0, 0, 0.12); }
+.ce-tick { font-size: 10px; color: #00d4aa; font-weight: 700; letter-spacing: 0.5px; }
+.ce-name { font-size: 11.5px; color: #94a3b8; font-family: 'Inter', sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ce-target { color: #e2e8f0; }
+.ce-arrow { flex-shrink: 0; opacity: 0.5; }
+
+/* Dissent tab */
+.dissent-entry {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-left: 2px solid transparent;
+  transition: border-color 0.15s, background 0.15s;
+}
+.dissent-entry:hover { border-left-color: #ef4444; background: rgba(239, 68, 68, 0.03); }
+.de-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.de-identity { display: flex; align-items: center; gap: 8px; }
+.de-name { font-size: 12.5px; font-weight: 700; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+.de-badge {
+  font-size: 8.5px;
+  letter-spacing: 1.5px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+.de-zone { font-size: 9.5px; color: #475569; letter-spacing: 0.5px; }
+.de-bio {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.5;
+  font-style: italic;
+  margin-bottom: 8px;
+  font-family: 'Inter', sans-serif;
+}
+.de-metrics { display: flex; flex-direction: column; gap: 4px; }
+.de-metric-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+}
+.de-metric-label { font-size: 9px; letter-spacing: 1.5px; color: #2d3748; min-width: 64px; }
+.de-metric-val { color: #e2e8f0; font-weight: 600; }
+.de-metric-vs { color: #475569; margin-left: auto; }
+.de-divergence-bar {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 1px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.de-div-fill { height: 100%; border-radius: 1px; transition: width 0.4s ease; }
+
+/* Turns tab */
+.turn-entry {
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-left: 2px solid #22d3ee33;
+  transition: border-color 0.15s, background 0.15s;
+}
+.turn-entry:hover { border-left-color: #22d3ee; background: rgba(34, 211, 238, 0.03); }
+.turn-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.turn-tick { font-size: 10px; color: #00d4aa; font-weight: 700; letter-spacing: 0.5px; }
+.turn-delta { font-size: 12px; font-weight: 700; }
+.turn-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.turn-zone { color: #94a3b8; font-family: 'Inter', sans-serif; }
+.turn-sep { color: #2d3748; }
+.turn-narr { font-size: 9.5px; color: #475569; letter-spacing: 1px; }
+.turn-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9.5px;
+}
+.turn-val { color: #475569; min-width: 40px; }
+.turn-bar-wrap {
+  flex: 1;
+  display: flex;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  gap: 1px;
+  overflow: hidden;
+}
+.turn-bar-before, .turn-bar-after { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+
+/* Dividers between sections */
+.intel-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px 4px;
+  margin-top: 4px;
+}
+.intel-divider::before {
+  content: '';
+  flex: 0 0 8px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.intel-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.intel-divider-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #2d3748;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Event log (beats) */
+.beats-log {
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
-.tcard {
+.blog-entry {
   display: flex;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  overflow: hidden;
-  animation: tcard-in 0.45s ease-out;
+  align-items: flex-start;
+  gap: 0;
+  padding: 8px 20px;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  width: 100%;
+  border-left: 2px solid transparent;
 }
-@keyframes tcard-in {
-  from { opacity: 0; transform: translateX(20px); }
+.blog-entry:hover { background: rgba(255, 255, 255, 0.03); }
+.blog-entry.active { background: rgba(0, 212, 170, 0.05); border-left-color: #00d4aa; }
+.blog-left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-right: 12px;
+  padding-top: 2px;
+  flex-shrink: 0;
+  width: 42px;
+}
+.blog-tick { font-size: 9.5px; color: #00d4aa; font-weight: 700; letter-spacing: 0.5px; }
+.blog-kind-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #475569;
+  flex-shrink: 0;
+}
+.blog-kind-dot.k-origin { background: #ffb347; }
+.blog-kind-dot.k-first { background: #ef4444; }
+.blog-kind-dot.k-journalist { background: #a855f7; }
+.blog-kind-dot.k-cascade { background: #facc15; }
+.blog-kind-dot.k-saturated { background: #10b981; }
+.blog-kind-dot.k-finished { background: #3b82f6; }
+.blog-kind-dot.k-dark { background: #475569; }
+.blog-kind-dot.k-event { background: #22d3ee; }
+.blog-kind-dot.k-gm_event { background: #fbbf24; }
+.blog-kind-dot.k-dispatch { background: #f97316; }
+.blog-kind-dot.k-dialog { background: #f472b6; }
+.blog-kind-dot.k-migration { background: #14b8a6; }
+.blog-right { flex: 1; }
+.blog-kind {
+  display: block;
+  font-size: 8.5px;
+  letter-spacing: 1.5px;
+  color: #475569;
+  margin-bottom: 2px;
+}
+.blog-entry.active .blog-kind { color: #00d4aa; }
+.blog-text {
+  font-size: 11.5px;
+  color: #64748b;
+  line-height: 1.45;
+  font-family: 'Inter', sans-serif;
+}
+.blog-entry:hover .blog-text { color: #94a3b8; }
+.blog-entry.active .blog-text { color: #cbd5e1; }
+
+/* Agent intercepts (thought stream) */
+.intercept-feed { display: flex; flex-direction: column; }
+.intercept-card {
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  animation: ic-in 0.3s ease-out;
+}
+@keyframes ic-in {
+  from { opacity: 0; transform: translateX(10px); }
   to { opacity: 1; transform: translateX(0); }
 }
-.tcard-bar { width: 3px; flex-shrink: 0; }
-.tcard-body { flex: 1; padding: 10px 12px 12px 10px; }
-.tcard-meta {
+.ic-accent { width: 2px; flex-shrink: 0; }
+.ic-body { flex: 1; padding: 10px 16px 10px 14px; }
+.ic-header {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 4px;
-  font-size: 10.5px;
-  font-family: 'JetBrains Mono', monospace;
 }
-.tcard-who { font-weight: 700; color: #ffffff; letter-spacing: 0.2px; }
-.tcard-zone { font-weight: 700; letter-spacing: 1px; }
-.tcard-tick { color: #64748b; margin-left: auto; }
-.tcard-text {
-  font-size: 12.5px;
+.ic-name { font-size: 11px; font-weight: 700; color: #e2e8f0; letter-spacing: 0.2px; }
+.ic-zone { font-size: 9px; letter-spacing: 1px; opacity: 0.8; margin-left: auto; }
+.ic-tick { font-size: 9px; color: #2d3748; letter-spacing: 0.5px; }
+.ic-text {
+  font-size: 12px;
+  color: #64748b;
   line-height: 1.55;
-  color: #cbd5e1;
   font-style: italic;
+  font-family: 'Inter', sans-serif;
 }
 
 /* Caption strip — narrator */
@@ -1760,49 +2166,6 @@ onBeforeUnmount(() => {
 .chapter.k-dialog { background: #f472b6; border-color: #f472b6; }
 .chapter.k-migration { background: #14b8a6; border-color: #14b8a6; }
 
-/* Story beats list in drawer */
-.beats { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; padding-right: 2px; }
-.beats::-webkit-scrollbar { width: 4px; }
-.beats::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 2px; }
-.beat {
-  display: grid;
-  grid-template-columns: 36px 64px 1fr;
-  align-items: start;
-  gap: 8px;
-  text-align: left;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-left: 3px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  padding: 8px 10px;
-  cursor: pointer;
-  color: inherit;
-  font-family: inherit;
-  transition: all 0.15s;
-}
-.beat:hover { border-color: rgba(255, 179, 71, 0.4); border-left-color: rgba(255, 179, 71, 0.6); }
-.beat.active { background: rgba(255, 179, 71, 0.08); border-color: rgba(255, 179, 71, 0.5); border-left-color: #ffc072; }
-.beat.k-origin { border-left-color: #ffb347; }
-.beat.k-first { border-left-color: #ef4444; }
-.beat.k-journalist { border-left-color: #a855f7; }
-.beat.k-cascade { border-left-color: #facc15; }
-.beat.k-saturated { border-left-color: #10b981; }
-.beat.k-finished { border-left-color: #3b82f6; }
-.beat.k-dark { border-left-color: #64748b; }
-.beat.k-event { border-left-color: #22d3ee; }
-.beat.k-dispatch { border-left-color: #f97316; }
-.beat.k-dialog { border-left-color: #f472b6; }
-.beat.k-migration { border-left-color: #14b8a6; }
-.beat-tick { font-size: 11px; color: #ffc072; font-weight: 700; padding-top: 1px; }
-.beat-kind {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  letter-spacing: 1.3px;
-  color: #94a3b8;
-  text-transform: uppercase;
-  padding-top: 2px;
-}
-.beat-text { font-size: 12px; color: #cbd5e1; line-height: 1.45; }
 
 /* Bottom player bar */
 .player {
@@ -2009,115 +2372,4 @@ onBeforeUnmount(() => {
 .event-banner-enter-from { opacity: 0; transform: translateX(-50%) translateY(-14px); }
 .event-banner-leave-to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
 
-/* Debrief tabs */
-.debrief-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding-bottom: 8px;
-}
-.dtab {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px 5px 0 0;
-  padding: 6px 10px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
-  letter-spacing: 1.2px;
-  color: #94a3b8;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.dtab:hover { color: #ffc072; }
-.dtab.active {
-  color: #ffc072;
-  border-color: rgba(255, 179, 71, 0.45);
-  background: rgba(255, 179, 71, 0.08);
-}
-.dtab-n { color: #475569; margin-left: 5px; font-weight: 500; }
-
-.debrief-sections { display: flex; flex-direction: column; gap: 14px; }
-.debrief-section {
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 2px solid rgba(255, 179, 71, 0.5);
-  padding: 10px 14px;
-  border-radius: 4px;
-}
-.debrief-section-title {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10.5px;
-  letter-spacing: 1.8px;
-  color: #ffc072;
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-.debrief-section-body {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #cbd5e1;
-  white-space: pre-wrap;
-}
-
-.debrief-list { display: flex; flex-direction: column; gap: 6px; }
-.chain-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  background: rgba(255, 255, 255, 0.025);
-  border-radius: 4px;
-  font-size: 12.5px;
-}
-.chain-tick { color: #ffc072; font-weight: 700; font-size: 11px; min-width: 34px; }
-.chain-name { color: #e6edf9; font-weight: 600; }
-.chain-arrow { color: #64748b; }
-.dissent-card {
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(239, 68, 68, 0.25);
-  border-radius: 6px;
-  padding: 9px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.dissent-head { display: flex; align-items: baseline; gap: 8px; }
-.dissent-name { font-size: 13px; font-weight: 700; color: #fca5a5; }
-.dissent-zone { font-size: 10.5px; color: #94a3b8; }
-.dissent-bio { font-size: 12px; color: #cbd5e1; font-style: italic; line-height: 1.4; }
-.dissent-metric { display: flex; align-items: center; gap: 10px; font-size: 11px; }
-.dissent-key { color: #94a3b8; letter-spacing: 1px; }
-.dissent-stance { color: #fca5a5; font-weight: 700; }
-.dissent-stance.pos { color: #86efac; }
-.dissent-stance.neg { color: #fca5a5; }
-.dissent-vs { color: #475569; }
-
-.turning-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.025);
-  border-left: 2px solid #22d3ee;
-  border-radius: 4px;
-}
-.turning-body { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.turning-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-.turning-zone { color: #e6edf9; font-weight: 600; }
-.turning-narr { color: #8490a8; font-size: 10.5px; letter-spacing: 1px; text-transform: capitalize; }
-.turning-delta {
-  font-size: 12px;
-  color: #67e8f9;
-  font-family: 'JetBrains Mono', monospace;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.turning-sub { color: #64748b; font-size: 10.5px; }
 </style>
